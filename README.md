@@ -83,3 +83,4 @@ Summary:
 3. **"Missing environment variables"**: Ensure all required fields are in `.env`
 
 Your streamlined Jira time tracking bot is ready! 🎉# jira-bot
+# jira-bot
