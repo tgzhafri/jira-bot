@@ -40,7 +40,7 @@ class JiraTimeTracker:
         """
         
         params = {
-            'jql': jql,
+            'jql': jql.strip(),
             'fields': 'key,summary,components,labels,issuetype,worklog,customfield_*',
             'expand': 'worklog',
             'maxResults': 100
@@ -51,7 +51,7 @@ class JiraTimeTracker:
         
         while True:
             params['startAt'] = start_at
-            response = self._make_request("search", params)
+            response = self._make_request("search/jql", params)
             issues.extend(response.get('issues', []))
             
             if start_at + len(response.get('issues', [])) >= response.get('total', 0):

@@ -76,11 +76,42 @@ Summary:
 - **Maintenance:** Bug, Hotfix, Support, Incident, Defect issue types or maintenance-related labels
 - **Development:** All other issue types and labels
 
+## 🧪 Testing
+
+The project includes a comprehensive test suite to ensure reliability:
+
+```bash
+# Run all tests
+python run_tests.py
+
+# Or use pytest directly
+pytest test_jira_time_tracker.py -v
+
+# Run specific test
+python run_tests.py TestJiraTimeTracker::test_get_issues_with_worklog_new_api
+```
+
+**Test Coverage:**
+- API endpoint integration (new `/rest/api/3/search/jql` endpoint)
+- Work type categorization logic
+- Date and user filtering
+- Pagination handling
+- Error handling and edge cases
+- Report generation and formatting
+
 ## 🛠️ Troubleshooting
 
 1. **"No worklog data"**: Check if you have time logged in Jira for the current year
 2. **"Connection failed"**: Verify your API token and URL in `.env`
 3. **"Missing environment variables"**: Ensure all required fields are in `.env`
+4. **"410 Gone" errors**: This has been fixed in v2.0.0 with the new API endpoint
 
-Your streamlined Jira time tracking bot is ready! 🎉# jira-bot
-# jira-bot
+## 📋 Recent Updates
+
+**v2.0.0 (2025-10-01)**
+- ✅ Fixed JIRA API deprecation issue (410 Gone error)
+- ✅ Updated to new `/rest/api/3/search/jql` endpoint
+- ✅ Added comprehensive test suite with 20+ test cases
+- ✅ Maintained full backward compatibility
+
+Your streamlined Jira time tracking bot is ready! 🎉
