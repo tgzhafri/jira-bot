@@ -1,0 +1,20 @@
+services:
+  jira-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: automate-jira
+    env_file:
+      - .env
+    volumes:
+      # Mount reports directory to persist CSV files
+      - ./reports:/app/reports
+      # Mount cache directory for faster subsequent runs
+      - ./.cache:/app/.cache
+    environment:
+      # Override output location if needed
+      - PYTHONUNBUFFERED=1
+    # Run the report generation
+    command: python scripts/generate_report.py
+    # Restart policy
+    restart: "no"

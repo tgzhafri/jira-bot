@@ -1,0 +1,28 @@
+services:
+  streamlit-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: automate-jira-web
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      # Mount .env file so app can check it exists
+      - ./.env:/app/.env:ro
+      # Mount reports directory to persist CSV files
+      - ./reports:/app/reports
+      # Mount cache directory for faster subsequent runs
+      - ./.cache:/app/.cache
+      # Mount app.py for hot reload during development
+      - ./app.py:/app/app.py
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

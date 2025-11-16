@@ -1,0 +1,9 @@
+Project,Component,John Doe,Jane Smith,Bob Wilson,Alice Chen
+ERP,HR,40.0,8.0,,16.0
+ERP,Recruitment,24.0,12.0,8.0,
+ERP,Payroll,32.0,,,20.0
+Client Portal,Core,4.0,2.0,,
+Client Portal,Recruitment,16.0,,8.0,
+Client Portal,Authentication,,10.0,6.0,8.0
+ETL,Data Pipeline,20.0,32.0,16.0,12.0
+ETL,Unassigned,12.0,8.0,,

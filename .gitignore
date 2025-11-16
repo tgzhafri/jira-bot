@@ -163,7 +163,12 @@ cython_debug/
 
 # Project-specific files
 manhour_report_*.txt
+manhour_report_*.csv
 *.log
+reports/
+
+# Cache directory
+.cache/
 
 # OS generated files
 .DS_Store
