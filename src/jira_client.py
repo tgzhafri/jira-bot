@@ -218,13 +218,9 @@ class JiraClient:
                 # Fetch user details to get active status
                 user_details = self.get_user_details(author_data.get('accountId'))
                 active = user_details.get('active', True)
-                logger.debug(f"Fetched active status for {author_data.get('displayName')}: {active}")
             elif active is None:
                 # No account ID and no active field, default to True
                 active = True
-                logger.debug(f"No account ID for {author_data.get('displayName')}, defaulting active=True")
-            else:
-                logger.debug(f"Active status from worklog for {author_data.get('displayName')}: {active}")
             
             author = Author(
                 email=author_data.get('emailAddress', 'unknown'),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for TeamOverviewExporter
+Unit tests for YearlyOverviewExporter
 """
 
 import sys
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.exporters import TeamOverviewExporter
+from src.exporters import YearlyOverviewExporter
 from src.models import (
     YearlyReport, MonthlyReport, TimeEntry,
     ProjectComponent, Component, Author, WorkType
@@ -71,7 +71,7 @@ def sample_yearly_report():
 def test_export_yearly_with_total_row(sample_yearly_report, tmp_path):
     """Test that export_yearly adds a TOTAL row"""
     output_path = tmp_path / "test_report.csv"
-    exporter = TeamOverviewExporter(output_path)
+    exporter = YearlyOverviewExporter(output_path)
     
     result = exporter.export_yearly(sample_yearly_report)
     
@@ -100,7 +100,7 @@ def test_export_yearly_with_total_row(sample_yearly_report, tmp_path):
 def test_export_yearly_total_calculation(sample_yearly_report, tmp_path):
     """Test that TOTAL row calculations are correct"""
     output_path = tmp_path / "test_report.csv"
-    exporter = TeamOverviewExporter(output_path)
+    exporter = YearlyOverviewExporter(output_path)
     
     result = exporter.export_yearly(sample_yearly_report)
     
@@ -154,7 +154,7 @@ def test_export_monthly_with_total_row(tmp_path):
     )
     
     output_path = tmp_path / "test_monthly.csv"
-    exporter = TeamOverviewExporter(output_path)
+    exporter = YearlyOverviewExporter(output_path)
     
     result = exporter.export_monthly(monthly)
     

@@ -187,7 +187,7 @@ def test_processor():
 def test_csv_exporter():
     """Test CSV exporter"""
     print("\nTesting CSV exporter...")
-    from src.exporters import TeamOverviewExporter
+    from src.exporters import YearlyOverviewExporter
     from src.models import (
         YearlyReport, MonthlyReport, TimeEntry, 
         ProjectComponent, Component, Author, WorkType
@@ -219,7 +219,7 @@ def test_csv_exporter():
         
         # Export
         output_path = Path("test_report.csv")
-        exporter = TeamOverviewExporter(output_path)
+        exporter = YearlyOverviewExporter(output_path)
         result = exporter.export_yearly(yearly)
         
         assert result.exists()
@@ -234,7 +234,7 @@ def test_csv_exporter():
         # Cleanup
         output_path.unlink()
         
-        print("  ✅ TeamOverviewExporter works")
+        print("  ✅ YearlyOverviewExporter works")
         return True
     except Exception as e:
         print(f"  ❌ CSV exporter test failed: {e}")

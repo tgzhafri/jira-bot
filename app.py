@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.config import Config
 from src.jira_client import JiraClient
 from src.utils import get_month_range, format_date_for_jql
-from src.report_generator import generate_csv_report
+from src.report_generator import generate_csv_report, generate_quarterly_report
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -131,23 +131,23 @@ def display_report_preview(result_path: Path, csv_data: bytes):
         dev_df, maint_df = parse_split_csv(result_path)
         stats = calculate_summary_stats(dev_df, maint_df)
         
-        # Display summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+        # Display summary metrics in two rows
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Projects", stats['projects'])
         with col2:
             st.metric("Components", stats['components'])
         with col3:
             st.metric("Team Members", stats['team_members'])
-        with col4:
-            st.metric("Total Hours", f"{stats['total_hours']:.1f}h")
         
-        # Display Development hours breakdown
-        col1, col2 = st.columns(2)
+        # Display hours breakdown in one row
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Development Hours", f"{stats['dev_hours']:.1f}h")
         with col2:
             st.metric("Maintenance Hours", f"{stats['maint_hours']:.1f}h")
+        with col3:
+            st.metric("Total Hours", f"{stats['total_hours']:.1f}h")
         
         # Display Development table
         if not dev_df.empty:
@@ -214,6 +214,14 @@ def main():
     
     # Sidebar configuration
     st.sidebar.header(":gear: Configuration")
+    
+    # Report type selector
+    report_type = st.sidebar.radio(
+        "Report Type",
+        options=["Yearly Overview", "Quarterly Breakdown"],
+        index=0,
+        help="Choose between yearly summary or quarterly breakdown"
+    )
     
     current_year = datetime.now().year
     year = st.sidebar.number_input(
@@ -294,8 +302,13 @@ def main():
         return
     
     # Generate button
-    if st.button(":rocket: Generate Report", type="primary", use_container_width=True):
-        with st.spinner(f"Generating team overview report for {year}..."):
+    button_label = ":rocket: Generate Report"
+    if st.button(button_label, type="primary", use_container_width=True):
+        # Determine report type and settings
+        is_quarterly = report_type == "Quarterly Breakdown"
+        report_name = "quarterly breakdown" if is_quarterly else "yearly overview"
+        
+        with st.spinner(f"Generating {report_name} report for {year}..."):
             try:
                 progress_text = st.empty()
                 progress_bar = st.progress(0)
@@ -305,16 +318,25 @@ def main():
                 progress_text.text("Fetching data from Jira...")
                 progress_bar.progress(30)
                 
-                # Generate team overview report
-                output_file = f"reports/manhour_report_{year}.csv"
-                download_filename = f"manhour_report_{year}.csv"
-                
-                result_path = generate_csv_report(
-                    config,
-                    year=year,
-                    output_file=output_file,
-                    max_workers=max_workers
-                )
+                # Generate report based on type
+                if is_quarterly:
+                    output_file = f"reports/quarterly_report_{year}.csv"
+                    download_filename = f"quarterly_report_{year}.csv"
+                    result_path = generate_quarterly_report(
+                        config,
+                        year=year,
+                        output_file=output_file,
+                        max_workers=max_workers
+                    )
+                else:
+                    output_file = f"reports/manhour_report_{year}.csv"
+                    download_filename = f"manhour_report_{year}.csv"
+                    result_path = generate_csv_report(
+                        config,
+                        year=year,
+                        output_file=output_file,
+                        max_workers=max_workers
+                    )
                 
                 # Clear progress indicators
                 progress_bar.empty()
@@ -344,7 +366,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.9em;'>
-        Built with :heart: using Streamlit | Automate Jira v1.0.0
+        Built using Streamlit | Automate Jira v1.0.0
     </div>
     """, unsafe_allow_html=True)
 

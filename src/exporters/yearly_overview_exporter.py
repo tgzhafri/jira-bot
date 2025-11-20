@@ -1,5 +1,5 @@
 """
-Team overview CSV exporter for multi-user reports
+Yearly overview CSV exporter for multi-user reports
 """
 
 import csv
@@ -13,8 +13,8 @@ from ..models import YearlyReport, MonthlyReport, ProjectComponent
 logger = logging.getLogger(__name__)
 
 
-class TeamOverviewExporter(BaseExporter):
-    """Export team overview reports to CSV format"""
+class YearlyOverviewExporter(BaseExporter):
+    """Export yearly overview reports to CSV format"""
     
     def __init__(self, output_path: Path, filter_active_only: bool = True):
         """Initialize exporter with option to filter active employees only"""
@@ -46,25 +46,14 @@ class TeamOverviewExporter(BaseExporter):
                 author = entry.author
                 work_type = entry.work_type
                 
-                # Track all authors we encounter
-                all_encountered_authors.add(author)
-                
                 # Filter by active status if specified
                 if self.filter_active_only and not author.active:
-                    filtered_authors.add(author)
-                    logger.info(f"FILTERED OUT: {author.display_name} (email={author.email}, active={author.active})")
                     continue
                 
                 # Only track Development and Maintenance
                 if work_type in [WorkType.DEVELOPMENT, WorkType.MAINTENANCE]:
                     data_by_type[work_type][pc][author] += entry.hours
                     all_authors.add(author)
-                    logger.debug(f"INCLUDED: {author.display_name} (email={author.email}, active={author.active})")
-        
-        # Log summary
-        logger.info(f"Total authors encountered: {len(all_encountered_authors)}")
-        logger.info(f"Inactive authors filtered out: {len(filtered_authors)}")
-        logger.info(f"Active authors included in report: {len(all_authors)}")
         
         # Sort authors by display name
         sorted_authors = sorted(all_authors, key=lambda a: a.display_name)
