@@ -21,6 +21,7 @@ class Author:
     email: str
     display_name: str
     account_id: Optional[str] = None
+    active: bool = True  # User active status from Jira API
     
     def __hash__(self):
         # Use account_id if available, otherwise use email+display_name

@@ -104,7 +104,6 @@ class JiraClient:
             # Save to cache
             if use_cache and method == "GET":
                 self._save_to_cache(cache_key, data)
-            
             return data
         
         except requests.exceptions.HTTPError as e:
@@ -117,6 +116,20 @@ class JiraClient:
         
         except requests.exceptions.RequestException as e:
             raise JiraAPIError(f"Network error: {e}")
+    
+    def get_user_details(self, account_id: str) -> Dict:
+        """Get user details including active status
+        
+        The worklog API doesn't always include the 'active' field in author data,
+        so we fetch it from the user API endpoint which always includes it.
+        Results are cached to avoid repeated API calls for the same user.
+        """
+        try:
+            endpoint = f"user?accountId={account_id}"
+            return self._make_request(endpoint, use_cache=True)
+        except Exception as e:
+            logger.warning(f"Failed to fetch user details for {account_id}: {e}")
+            return {}
     
     def get_issues_with_worklog(
         self,
@@ -198,10 +211,26 @@ class JiraClient:
         
         for wl in worklog_list:
             author_data = wl.get('author', {})
+            
+            # Get active status - fetch from user API if not in worklog response
+            active = author_data.get('active')
+            if active is None and author_data.get('accountId'):
+                # Fetch user details to get active status
+                user_details = self.get_user_details(author_data.get('accountId'))
+                active = user_details.get('active', True)
+                logger.debug(f"Fetched active status for {author_data.get('displayName')}: {active}")
+            elif active is None:
+                # No account ID and no active field, default to True
+                active = True
+                logger.debug(f"No account ID for {author_data.get('displayName')}, defaulting active=True")
+            else:
+                logger.debug(f"Active status from worklog for {author_data.get('displayName')}: {active}")
+            
             author = Author(
                 email=author_data.get('emailAddress', 'unknown'),
                 display_name=author_data.get('displayName', 'Unknown'),
-                account_id=author_data.get('accountId')
+                account_id=author_data.get('accountId'),
+                active=active
             )
             
             worklog = Worklog(

@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config, JiraConfig, ReportConfig
 from src.models import Author, Component, Issue, Worklog, WorkType
-from scripts.generate_report import generate_csv_report
+from src.report_generator import generate_csv_report
 
 
 @pytest.fixture

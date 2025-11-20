@@ -161,6 +161,9 @@ cython_debug/
 # VS Code
 .vscode/
 
+# Kiro
+.kiro
+
 # Project-specific files
 manhour_report_*.txt
 manhour_report_*.csv

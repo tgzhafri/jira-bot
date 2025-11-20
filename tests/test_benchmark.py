@@ -11,8 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config
-from scripts.generate_report import generate_csv_report
-from scripts.clear_cache import clear_cache
+from src.report_generator import generate_csv_report
 
 
 def benchmark():
