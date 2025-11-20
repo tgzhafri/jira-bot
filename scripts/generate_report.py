@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config
 from src.jira_client import JiraClientError
-from src.report_generator import generate_csv_report, generate_quarterly_report
+from src.report_generator import generate_csv_report, generate_quarterly_report, generate_monthly_breakdown_report
 from src.utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -35,11 +35,17 @@ Examples:
   # Generate quarterly breakdown report
   python scripts/generate_report.py --quarterly
   
+  # Generate monthly breakdown report (one sheet per team member)
+  python scripts/generate_report.py --monthly
+  
   # Generate report for specific year
   python scripts/generate_report.py --year 2024
   
   # Generate quarterly report for 2024
   python scripts/generate_report.py --quarterly --year 2024
+  
+  # Generate monthly breakdown for 2024
+  python scripts/generate_report.py --monthly --year 2024
         """
     )
     
@@ -47,6 +53,12 @@ Examples:
         '--quarterly',
         action='store_true',
         help='Generate quarterly breakdown report instead of yearly overview'
+    )
+    
+    parser.add_argument(
+        '--monthly',
+        action='store_true',
+        help='Generate monthly breakdown report (one sheet per team member)'
     )
     
     parser.add_argument(
@@ -59,7 +71,7 @@ Examples:
     parser.add_argument(
         '--output',
         type=str,
-        help='Output file path (default: reports/manhour_report_YYYY.csv or reports/quarterly_report_YYYY.csv)'
+        help='Output file path (default: reports/manhour_report_YYYY.csv, reports/quarterly_report_YYYY.csv, or reports/monthly_breakdown_YYYY.csv)'
     )
     
     parser.add_argument(
@@ -80,7 +92,14 @@ Examples:
         config.validate()
         
         # Generate report based on type
-        if args.quarterly:
+        if args.monthly:
+            logger.info(f"Generating monthly breakdown report for {args.year}")
+            generate_monthly_breakdown_report(
+                config,
+                year=args.year,
+                output_file=args.output
+            )
+        elif args.quarterly:
             logger.info(f"Generating quarterly breakdown report for {args.year}")
             generate_quarterly_report(
                 config,
