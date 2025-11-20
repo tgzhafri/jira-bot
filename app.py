@@ -105,12 +105,23 @@ def calculate_summary_stats(dev_df: pd.DataFrame, maint_df: pd.DataFrame) -> dic
     dev_projects, dev_components, dev_hours = get_stats_from_df(dev_df)
     maint_projects, maint_components, maint_hours = get_stats_from_df(maint_df)
     
-    # Team members count (from either df, should be same)
+    # Team members count - for quarterly reports, divide by 4 (Q1-Q4 per member)
     team_members = 0
     if not dev_df.empty:
-        team_members = len(dev_df.columns) - 2
+        # Check if this is a quarterly report (columns end with Q1, Q2, Q3, Q4)
+        cols = [c for c in dev_df.columns if c not in ['Project', 'Component']]
+        if cols and any('Q' in str(col) for col in cols):
+            # Quarterly report: each member has 4 columns (Q1-Q4)
+            team_members = len(cols) // 4
+        else:
+            # Yearly report: one column per member
+            team_members = len(cols)
     elif not maint_df.empty:
-        team_members = len(maint_df.columns) - 2
+        cols = [c for c in maint_df.columns if c not in ['Project', 'Component']]
+        if cols and any('Q' in str(col) for col in cols):
+            team_members = len(cols) // 4
+        else:
+            team_members = len(cols)
     
     return {
         'projects': max(dev_projects, maint_projects),
@@ -120,6 +131,36 @@ def calculate_summary_stats(dev_df: pd.DataFrame, maint_df: pd.DataFrame) -> dic
         'maint_hours': maint_hours,
         'total_hours': dev_hours + maint_hours
     }
+
+
+def transform_to_multiindex(df: pd.DataFrame) -> pd.DataFrame:
+    """Transform quarterly columns to multi-level index for better display"""
+    if df.empty:
+        return df
+    
+    # Check if this is a quarterly report
+    cols = [c for c in df.columns if c not in ['Project', 'Component']]
+    if not cols or not any('Q' in str(col) for col in cols):
+        return df  # Not quarterly, return as-is
+    
+    # Create multi-level columns
+    new_columns = [('', 'Project'), ('', 'Component')]
+    
+    for col in cols:
+        # Parse "Name Q1" format
+        if ' Q' in col:
+            parts = col.rsplit(' Q', 1)
+            name = parts[0]
+            quarter = f'Q{parts[1]}'
+            new_columns.append((name, quarter))
+        else:
+            new_columns.append(('', col))
+    
+    # Create new dataframe with multi-level columns
+    df_multi = df.copy()
+    df_multi.columns = pd.MultiIndex.from_tuples(new_columns)
+    
+    return df_multi
 
 
 def display_report_preview(result_path: Path, csv_data: bytes):
@@ -152,11 +193,26 @@ def display_report_preview(result_path: Path, csv_data: bytes):
         # Display Development table
         if not dev_df.empty:
             st.markdown("### :wrench: Development")
+            # Transform to multi-level columns for quarterly reports
+            dev_display = transform_to_multiindex(dev_df)
+            
             # Style the TOTAL row and format numbers to 1 decimal place
-            styled_dev = dev_df.style.apply(
-                lambda x: ['background-color: #f0f2f6; font-weight: bold' if x['Project'] == 'TOTAL' else '' for _ in x],
-                axis=1
-            ).format({col: '{:.1f}' for col in dev_df.columns if col not in ['Project', 'Component']}, na_rep='')
+            def highlight_total(row):
+                # Check if Project column is TOTAL
+                if isinstance(dev_display.columns, pd.MultiIndex):
+                    is_total = row[('', 'Project')] == 'TOTAL'
+                else:
+                    is_total = row['Project'] == 'TOTAL'
+                return ['background-color: #f0f2f6; font-weight: bold' if is_total else '' for _ in row]
+            
+            styled_dev = dev_display.style.apply(highlight_total, axis=1)
+            
+            # Format numeric columns
+            if isinstance(dev_display.columns, pd.MultiIndex):
+                format_dict = {col: '{:.1f}' for col in dev_display.columns if col not in [('', 'Project'), ('', 'Component')]}
+            else:
+                format_dict = {col: '{:.1f}' for col in dev_display.columns if col not in ['Project', 'Component']}
+                        
             st.dataframe(
                 styled_dev,
                 use_container_width=True,
@@ -167,11 +223,25 @@ def display_report_preview(result_path: Path, csv_data: bytes):
         # Display Maintenance table
         if not maint_df.empty:
             st.markdown("### :hammer_and_wrench: Maintenance")
+            # Transform to multi-level columns for quarterly reports
+            maint_display = transform_to_multiindex(maint_df)
+            
             # Style the TOTAL row and format numbers to 1 decimal place
-            styled_maint = maint_df.style.apply(
-                lambda x: ['background-color: #f0f2f6; font-weight: bold' if x['Project'] == 'TOTAL' else '' for _ in x],
-                axis=1
-            ).format({col: '{:.1f}' for col in maint_df.columns if col not in ['Project', 'Component']}, na_rep='')
+            def highlight_total(row):
+                if isinstance(maint_display.columns, pd.MultiIndex):
+                    is_total = row[('', 'Project')] == 'TOTAL'
+                else:
+                    is_total = row['Project'] == 'TOTAL'
+                return ['background-color: #f0f2f6; font-weight: bold' if is_total else '' for _ in row]
+            
+            styled_maint = maint_display.style.apply(highlight_total, axis=1)
+            
+            # Format numeric columns
+            if isinstance(maint_display.columns, pd.MultiIndex):
+                format_dict = {col: '{:.1f}' for col in maint_display.columns if col not in [('', 'Project'), ('', 'Component')]}
+            else:
+                format_dict = {col: '{:.1f}' for col in maint_display.columns if col not in ['Project', 'Component']}
+                        
             st.dataframe(
                 styled_maint,
                 use_container_width=True,
@@ -321,38 +391,63 @@ def main():
                 # Generate report based on type
                 if is_quarterly:
                     output_file = f"reports/quarterly_report_{year}.csv"
-                    download_filename = f"quarterly_report_{year}.csv"
-                    result_path = generate_quarterly_report(
+                    result = generate_quarterly_report(
                         config,
                         year=year,
                         output_file=output_file,
                         max_workers=max_workers
                     )
+                    # Quarterly returns tuple (csv_path, xlsx_path)
+                    csv_path, xlsx_path = result
+                    result_path = csv_path
                 else:
                     output_file = f"reports/manhour_report_{year}.csv"
-                    download_filename = f"manhour_report_{year}.csv"
                     result_path = generate_csv_report(
                         config,
                         year=year,
                         output_file=output_file,
                         max_workers=max_workers
                     )
+                    xlsx_path = None
                 
                 # Clear progress indicators
                 progress_bar.empty()
                 progress_text.empty()
                 
                 if result_path and Path(result_path).exists():
+                    # CSV download button
                     with open(result_path, 'rb') as f:
                         csv_data = f.read()
                     
-                    st.download_button(
-                        label=":inbox_tray: Download CSV Report",
-                        data=csv_data,
-                        file_name=download_filename,
-                        mime="text/csv",
-                        use_container_width=True
-                    )
+                    # Show download buttons
+                    if is_quarterly and xlsx_path and Path(xlsx_path).exists():
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label=":inbox_tray: Download CSV",
+                                data=csv_data,
+                                file_name=f"quarterly_report_{year}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                        with col2:
+                            with open(xlsx_path, 'rb') as f:
+                                xlsx_data = f.read()
+                            st.download_button(
+                                label=":inbox_tray: Download XLSX (Formatted)",
+                                data=xlsx_data,
+                                file_name=f"quarterly_report_{year}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                    else:
+                        st.download_button(
+                            label=":inbox_tray: Download CSV Report",
+                            data=csv_data,
+                            file_name=Path(result_path).name,
+                            mime="text/csv",
+                            use_container_width=True
+                        )
                     
                     display_report_preview(Path(result_path), csv_data)
                 else:

@@ -327,12 +327,18 @@ def generate_quarterly_report(
     # Use quarterly exporter
     from .exporters import QuarterlyBreakdownExporter
     exporter = QuarterlyBreakdownExporter(output_path, filter_active_only=True)
-    result_path = exporter.export_yearly(yearly_report)
+    result_paths = exporter.export_yearly(yearly_report)
+    
+    # result_paths is a tuple (csv_path, xlsx_path)
+    csv_path, xlsx_path = result_paths
 
     export_time = time.time() - export_start
     total_time = time.time() - start_time
 
-    logger.info(f"✅ Quarterly CSV report generated: {result_path}")
+    logger.info(f"✅ Quarterly reports generated:")
+    logger.info(f"   CSV: {csv_path}")
+    if xlsx_path:
+        logger.info(f"   XLSX: {xlsx_path}")
     logger.info(f"⏱️  Performance: Fetch={fetch_time:.1f}s, Export={export_time:.1f}s, Total={total_time:.1f}s")
 
-    return result_path
+    return result_paths
