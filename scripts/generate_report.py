@@ -14,7 +14,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config
 from src.jira_client import JiraClientError
-from src.report_generator import generate_csv_report, generate_quarterly_report, generate_monthly_breakdown_report
+from src.report_generator import (
+    generate_csv_report,
+    generate_quarterly_report,
+    generate_monthly_breakdown_report,
+    generate_weekly_breakdown_report
+)
 from src.utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -38,6 +43,9 @@ Examples:
   # Generate monthly breakdown report (one sheet per team member)
   python scripts/generate_report.py --monthly
   
+  # Generate weekly breakdown report (one sheet per team member)
+  python scripts/generate_report.py --weekly
+  
   # Generate report for specific year
   python scripts/generate_report.py --year 2024
   
@@ -46,6 +54,9 @@ Examples:
   
   # Generate monthly breakdown for 2024
   python scripts/generate_report.py --monthly --year 2024
+  
+  # Generate weekly breakdown for 2024
+  python scripts/generate_report.py --weekly --year 2024
         """
     )
     
@@ -62,6 +73,12 @@ Examples:
     )
     
     parser.add_argument(
+        '--weekly',
+        action='store_true',
+        help='Generate weekly breakdown report (one sheet per team member with weeks per month)'
+    )
+    
+    parser.add_argument(
         '--year',
         type=int,
         default=datetime.now().year,
@@ -71,7 +88,7 @@ Examples:
     parser.add_argument(
         '--output',
         type=str,
-        help='Output file path (default: reports/manhour_report_YYYY.csv, reports/quarterly_report_YYYY.csv, or reports/monthly_breakdown_YYYY.csv)'
+        help='Output file path (default: reports/manhour_report_YYYY.csv, reports/quarterly_report_YYYY.csv, reports/monthly_breakdown_YYYY.csv, or reports/weekly_breakdown_YYYY.csv)'
     )
     
     parser.add_argument(
@@ -92,7 +109,14 @@ Examples:
         config.validate()
         
         # Generate report based on type
-        if args.monthly:
+        if args.weekly:
+            logger.info(f"Generating weekly breakdown report for {args.year}")
+            generate_weekly_breakdown_report(
+                config,
+                year=args.year,
+                output_file=args.output
+            )
+        elif args.monthly:
             logger.info(f"Generating monthly breakdown report for {args.year}")
             generate_monthly_breakdown_report(
                 config,

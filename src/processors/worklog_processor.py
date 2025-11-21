@@ -55,16 +55,19 @@ class WorklogProcessor:
                     key = (project_component, worklog.author, issue.work_type)
                     
                     # Add or update entry
+                    week_num = worklog.week_number
                     if key in aggregated:
-                        aggregated[key].add_hours(worklog.hours, issue.key)
+                        aggregated[key].add_hours(worklog.hours, issue.key, week_num)
                     else:
-                        aggregated[key] = TimeEntry(
+                        entry = TimeEntry(
                             project_component=project_component,
                             author=worklog.author,
                             hours=worklog.hours,
                             work_type=issue.work_type,
                             issues=[issue.key]
                         )
+                        entry.week_hours[week_num] = worklog.hours
+                        aggregated[key] = entry
         
         return list(aggregated.values())
     

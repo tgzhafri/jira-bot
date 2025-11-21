@@ -9,11 +9,12 @@
 
 - 🌐 **Web UI** - Interactive Streamlit interface with one-click report generation
 - 🐳 **Docker Ready** - Fully containerized for easy deployment anywhere
-- 📊 **CSV Export** - Team overview with hours per person per component
+- 📊 **Multiple Report Types** - Yearly overview, quarterly, monthly, and weekly breakdowns
 - 👤 **User Filtering** - Generate reports for all users or specific individuals
-- 📅 **Monthly Breakdown** - View individual user hours distributed across 12 months
+- 📅 **Time Breakdowns** - View hours by year, quarter, month, or week
 - 📁 **Project Selection** - Filter reports by specific projects
 - 📋 **Table Preview** - View reports in proper table format before downloading
+- 📑 **Multi-level Headers** - XLSX exports with organized, readable headers
 - ⚡ **High Performance** - Parallel processing, caching, and optimized API calls (70-90% faster)
 - 💾 **Smart Caching** - Instant re-runs with automatic response caching
 - 🏗️ **Modular Architecture** - Clean, maintainable code structure
@@ -89,29 +90,56 @@ Client Portal,Core,4.0,2.0,
 - **Hours** aggregated for the entire year
 - **Excel/Sheets ready** - import directly
 
-### Monthly Breakdown (Single User)
+### Monthly Breakdown (Per Team Member)
 
 ```csv
-Project,Component,Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec,Total
-ERP,HR,5.0,8.0,12.0,10.0,5.0,,,,,,,40.0
-ERP,Recruitment,2.0,4.0,6.0,4.0,4.0,2.0,2.0,,,,,24.0
-TOTAL,,7.0,12.0,20.0,16.0,9.0,2.0,2.0,,,,,68.0
+Team Member,Work Type,Project,Component,Jan,Feb,Mar,...,Dec,Total
+John Doe,Development,ERP,HR,5.0,8.0,12.0,...,0.0,40.0
+John Doe,Development,ERP,Recruitment,2.0,4.0,6.0,...,0.0,24.0
 ```
 
-- **One row** per project-component combination
-- **One column** per month (Jan-Dec)
-- **Total column** showing yearly sum
-- **Summary row** with monthly and grand totals
+- **One sheet per team member** (XLSX format)
+- **Separate sections** for Development and Maintenance
+- **12 month columns** (Jan-Dec) plus Total
+- **Summary rows** with monthly and grand totals
+
+### Weekly Breakdown (Per Team Member)
+
+```csv
+Team Member,Work Type,Project,Component,JanW1,JanW2,...,DecW5,Total
+John Doe,Development,ERP,HR,2.0,1.5,1.5,...,0.0,40.0
+```
+
+- **One sheet per team member** (XLSX format)
+- **Multi-level headers** in XLSX: Month names spanning 5 week columns
+- **60 week columns** (5 weeks × 12 months) plus Total
+- **Week calculation**: Based on day of month (1-7=W1, 8-14=W2, etc.)
+- **Separate sections** for Development and Maintenance
 
 See [docs/FEATURES.md](docs/FEATURES.md) for detailed feature documentation.
 
 ## Usage
 
-### Basic
+### CLI Options
 
 ```bash
-# Generate current year report (all projects)
+# Generate yearly overview report (default)
 python scripts/generate_report.py
+
+# Generate quarterly breakdown report
+python scripts/generate_report.py --quarterly
+
+# Generate monthly breakdown report (one sheet per team member)
+python scripts/generate_report.py --monthly
+
+# Generate weekly breakdown report (weeks within each month)
+python scripts/generate_report.py --weekly
+
+# Generate report for specific year
+python scripts/generate_report.py --year 2024
+
+# Combine options
+python scripts/generate_report.py --weekly --year 2024
 
 # Clear cache (force fresh data)
 python scripts/clear_cache.py
@@ -120,7 +148,7 @@ python scripts/clear_cache.py
 The script will:
 - Fetch all accessible projects (or only specified ones if JIRA_PROJECT_KEY is set)
 - Collect worklogs from all team members using parallel processing
-- Generate CSV with hours per person per component
+- Generate CSV and XLSX reports (for breakdown reports)
 - Cache responses for faster subsequent runs
 
 ### As Library

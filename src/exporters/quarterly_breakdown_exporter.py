@@ -7,6 +7,11 @@ import logging
 from pathlib import Path
 from collections import defaultdict
 
+from .base_exporter import BaseExporter
+from ..models import YearlyReport, WorkType
+
+logger = logging.getLogger(__name__)
+
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -15,11 +20,6 @@ try:
 except ImportError:
     XLSX_AVAILABLE = False
     logger.warning("openpyxl not available - XLSX export will be disabled")
-
-from .base_exporter import BaseExporter
-from ..models import YearlyReport, WorkType
-
-logger = logging.getLogger(__name__)
 
 
 class QuarterlyBreakdownExporter(BaseExporter):

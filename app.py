@@ -16,7 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.config import Config
 from src.jira_client import JiraClient
 from src.utils import get_month_range, format_date_for_jql
-from src.report_generator import generate_csv_report, generate_quarterly_report, generate_monthly_breakdown_report
+from src.report_generator import (
+    generate_csv_report,
+    generate_quarterly_report,
+    generate_monthly_breakdown_report,
+    generate_weekly_breakdown_report
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -163,12 +168,13 @@ def transform_to_multiindex(df: pd.DataFrame) -> pd.DataFrame:
     return df_multi
 
 
-def display_monthly_breakdown_preview(xlsx_path: Path):
-    """Display monthly breakdown preview with team member selector"""
+def display_monthly_breakdown_preview(xlsx_path: Path, report_type: str = "monthly"):
+    """Display monthly/weekly breakdown preview with team member selector"""
     try:
         from openpyxl import load_workbook
+        from calendar import month_name
         
-        wb = load_workbook(xlsx_path, read_only=True)
+        wb = load_workbook(xlsx_path, read_only=False)  # Need read_only=False to access merged_cells
         sheet_names = wb.sheetnames
         
         if not sheet_names:
@@ -176,20 +182,23 @@ def display_monthly_breakdown_preview(xlsx_path: Path):
             return
         
         # Team member selector
+        breakdown_type = "weekly" if report_type == "weekly" else "monthly"
         selected_member = st.selectbox(
             "Select Team Member",
             options=sheet_names,
-            help="Choose a team member to view their monthly breakdown"
+            help=f"Choose a team member to view their {breakdown_type} breakdown"
         )
         
         # Read the selected sheet
         ws = wb[selected_member]
         
-        # Parse sections manually to avoid column name conflicts
+        # Parse sections manually
         dev_data = []
         maint_data = []
         current_section = None
         header_row = None
+        header_row_2 = None
+        is_multilevel = report_type == "weekly"
         
         for row in ws.iter_rows(values_only=True):
             # Skip empty rows
@@ -200,16 +209,24 @@ def display_monthly_breakdown_preview(xlsx_path: Path):
             if row[0] == 'DEVELOPMENT':
                 current_section = 'dev'
                 header_row = None
+                header_row_2 = None
                 continue
             elif row[0] == 'MAINTENANCE':
                 current_section = 'maint'
                 header_row = None
+                header_row_2 = None
                 continue
             
-            # Capture header row for each section
+            # Capture header rows
             if current_section and header_row is None and row[0] in ['Project', 'TOTAL']:
                 if row[0] == 'Project':
                     header_row = row
+                continue
+            
+            # Capture second header row for weekly
+            if current_section and is_multilevel and header_row and header_row_2 is None and row[0] in ['Project', 'TOTAL']:
+                if row[0] == 'Project':
+                    header_row_2 = row
                 continue
             
             # Capture data rows
@@ -222,13 +239,60 @@ def display_monthly_breakdown_preview(xlsx_path: Path):
         # Display tables with TOTAL row styling
         if dev_data and header_row:
             st.markdown("### :wrench: Development")
-            dev_df = pd.DataFrame(dev_data, columns=header_row)
+            
+            # Create multi-level headers for weekly breakdown
+            if is_multilevel and header_row_2:
+                # Reconstruct proper multi-level headers for weekly data
+                # Level 1: Month names (spanning 5 weeks each)
+                # Level 2: Week numbers (W1-W5)
+                month_names_short = [month_name[i][:3] for i in range(1, 13)]
+                
+                multi_columns = []
+                # First two columns are Project and Component
+                multi_columns.append(('', 'Project'))
+                multi_columns.append(('', 'Component'))
+                
+                # Then 12 months × 5 weeks = 60 week columns
+                for month_abbr in month_names_short:
+                    for week in range(1, 6):
+                        multi_columns.append((month_abbr, f'W{week}'))
+                
+                # Last column is Total
+                multi_columns.append(('', 'Total'))
+                
+                dev_df = pd.DataFrame(dev_data)
+                dev_df.columns = pd.MultiIndex.from_tuples(multi_columns)
+                
+                # Find the actual Project column
+                project_col = ('', 'Project')
+            else:
+                # Single-level headers for monthly breakdown
+                unique_headers = []
+                seen = {}
+                for i, col in enumerate(header_row):
+                    # Handle None or empty column names
+                    if col is None or col == '':
+                        col = f'Column_{i}'
+                    
+                    col_str = str(col)
+                    if col_str in seen:
+                        seen[col_str] += 1
+                        unique_headers.append(f"{col_str}_{seen[col_str]}")
+                    else:
+                        seen[col_str] = 0
+                        unique_headers.append(col_str)
+                
+                dev_df = pd.DataFrame(dev_data, columns=unique_headers)
+                project_col = next((c for c in dev_df.columns if str(c).startswith('Project')), 'Project')
             
             # Style TOTAL row
             def highlight_total(row):
-                return ['background-color: #f0f2f6; font-weight: bold' if row['Project'] == 'TOTAL' else '' for _ in row]
+                try:
+                    return ['background-color: #f0f2f6; font-weight: bold' if row.get(project_col) == 'TOTAL' else '' for _ in row]
+                except:
+                    return ['' for _ in row]
             
-            # Format numeric columns to 1 decimal place (custom formatter to handle None/empty)
+            # Format numeric columns to 1 decimal place
             def format_number(val):
                 if val is None or val == '' or val == '-':
                     return '-'
@@ -237,20 +301,77 @@ def display_monthly_breakdown_preview(xlsx_path: Path):
                 except (ValueError, TypeError):
                     return str(val)
             
-            format_dict = {col: format_number for col in dev_df.columns if col not in ['Project', 'Component']}
+            # Build format dict based on column type
+            if is_multilevel and header_row_2:
+                format_dict = {col: format_number for col in dev_df.columns 
+                              if not str(col[0]).startswith('Project') and not str(col[0]).startswith('Component')}
+            else:
+                format_dict = {col: format_number for col in dev_df.columns 
+                              if not str(col).startswith('Project') and not str(col).startswith('Component')}
             
-            styled_dev = dev_df.style.apply(highlight_total, axis=1).format(format_dict)
-            st.dataframe(styled_dev, use_container_width=True, hide_index=True, height=250)
+            try:
+                styled_dev = dev_df.style.apply(highlight_total, axis=1).format(format_dict)
+                st.dataframe(styled_dev, use_container_width=True, hide_index=True, height=250)
+            except Exception as style_error:
+                # Fallback: display without styling
+                st.dataframe(dev_df, use_container_width=True, hide_index=True, height=250)
         
         if maint_data and header_row:
             st.markdown("### :hammer_and_wrench: Maintenance")
-            maint_df = pd.DataFrame(maint_data, columns=header_row)
+            
+            # Create multi-level headers for weekly breakdown
+            if is_multilevel and header_row_2:
+                # Reconstruct proper multi-level headers for weekly data
+                # Level 1: Month names (spanning 5 weeks each)
+                # Level 2: Week numbers (W1-W5)
+                month_names_short = [month_name[i][:3] for i in range(1, 13)]
+                
+                multi_columns = []
+                # First two columns are Project and Component
+                multi_columns.append(('', 'Project'))
+                multi_columns.append(('', 'Component'))
+                
+                # Then 12 months × 5 weeks = 60 week columns
+                for month_abbr in month_names_short:
+                    for week in range(1, 6):
+                        multi_columns.append((month_abbr, f'W{week}'))
+                
+                # Last column is Total
+                multi_columns.append(('', 'Total'))
+                
+                maint_df = pd.DataFrame(maint_data)
+                maint_df.columns = pd.MultiIndex.from_tuples(multi_columns)
+                
+                # Find the actual Project column
+                project_col = ('', 'Project')
+            else:
+                # Single-level headers for monthly breakdown
+                unique_headers = []
+                seen = {}
+                for i, col in enumerate(header_row):
+                    # Handle None or empty column names
+                    if col is None or col == '':
+                        col = f'Column_{i}'
+                    
+                    col_str = str(col)
+                    if col_str in seen:
+                        seen[col_str] += 1
+                        unique_headers.append(f"{col_str}_{seen[col_str]}")
+                    else:
+                        seen[col_str] = 0
+                        unique_headers.append(col_str)
+                
+                maint_df = pd.DataFrame(maint_data, columns=unique_headers)
+                project_col = next((c for c in maint_df.columns if str(c).startswith('Project')), 'Project')
             
             # Style TOTAL row
             def highlight_total(row):
-                return ['background-color: #f0f2f6; font-weight: bold' if row['Project'] == 'TOTAL' else '' for _ in row]
+                try:
+                    return ['background-color: #f0f2f6; font-weight: bold' if row.get(project_col) == 'TOTAL' else '' for _ in row]
+                except:
+                    return ['' for _ in row]
             
-            # Format numeric columns to 1 decimal place (custom formatter to handle None/empty)
+            # Format numeric columns to 1 decimal place
             def format_number(val):
                 if val is None or val == '' or val == '-':
                     return '-'
@@ -259,10 +380,20 @@ def display_monthly_breakdown_preview(xlsx_path: Path):
                 except (ValueError, TypeError):
                     return str(val)
             
-            format_dict = {col: format_number for col in maint_df.columns if col not in ['Project', 'Component']}
+            # Build format dict based on column type
+            if is_multilevel and header_row_2:
+                format_dict = {col: format_number for col in maint_df.columns 
+                              if not str(col[0]).startswith('Project') and not str(col[0]).startswith('Component')}
+            else:
+                format_dict = {col: format_number for col in maint_df.columns 
+                              if not str(col).startswith('Project') and not str(col).startswith('Component')}
             
-            styled_maint = maint_df.style.apply(highlight_total, axis=1).format(format_dict)
-            st.dataframe(styled_maint, use_container_width=True, hide_index=True, height=250)
+            try:
+                styled_maint = maint_df.style.apply(highlight_total, axis=1).format(format_dict)
+                st.dataframe(styled_maint, use_container_width=True, hide_index=True, height=250)
+            except Exception as style_error:
+                # Fallback: display without styling
+                st.dataframe(maint_df, use_container_width=True, hide_index=True, height=250)
         
         wb.close()
         
@@ -277,14 +408,15 @@ def display_report_preview(result_path: Path, csv_data: bytes, report_type: str 
     report_type_display = {
         "yearly": "Yearly Overview",
         "quarterly": "Quarterly Breakdown",
-        "monthly": "Monthly Breakdown"
+        "monthly": "Monthly Breakdown",
+        "weekly": "Weekly Breakdown"
     }.get(report_type, "Report")
     
     st.subheader(f":clipboard: Report Preview - {report_type_display}")
     
-    # For monthly breakdown, show XLSX preview with team member selector
-    if report_type == "monthly" and xlsx_path and Path(xlsx_path).exists():
-        display_monthly_breakdown_preview(xlsx_path)
+    # For monthly or weekly breakdown, show XLSX preview with team member selector
+    if report_type in ["monthly", "weekly"] and xlsx_path and Path(xlsx_path).exists():
+        display_monthly_breakdown_preview(xlsx_path, report_type)
         return
     
     try:
@@ -424,9 +556,9 @@ def main():
     # Report type selector
     report_type = st.sidebar.radio(
         "Report Type",
-        options=["Yearly Overview", "Quarterly Breakdown", "Monthly Breakdown"],
+        options=["Yearly Overview", "Quarterly Breakdown", "Monthly Breakdown", "Weekly Breakdown"],
         index=0,
-        help="Choose report type: yearly summary, quarterly breakdown, or monthly breakdown per team member"
+        help="Choose report type: yearly summary, quarterly breakdown, monthly breakdown, or weekly breakdown per team member"
     )
     
     current_year = datetime.now().year
@@ -513,8 +645,11 @@ def main():
         # Determine report type and settings
         is_quarterly = report_type == "Quarterly Breakdown"
         is_monthly = report_type == "Monthly Breakdown"
+        is_weekly = report_type == "Weekly Breakdown"
         
-        if is_monthly:
+        if is_weekly:
+            report_name = "weekly breakdown"
+        elif is_monthly:
             report_name = "monthly breakdown"
         elif is_quarterly:
             report_name = "quarterly breakdown"
@@ -532,7 +667,17 @@ def main():
                 progress_bar.progress(30)
                 
                 # Generate report based on type
-                if is_monthly:
+                if is_weekly:
+                    output_file = f"reports/weekly_breakdown_{year}.csv"
+                    result = generate_weekly_breakdown_report(
+                        config,
+                        year=year,
+                        output_file=output_file,
+                        max_workers=max_workers
+                    )
+                    csv_path, xlsx_path = result
+                    result_path = csv_path
+                elif is_monthly:
                     output_file = f"reports/monthly_breakdown_{year}.csv"
                     result = generate_monthly_breakdown_report(
                         config,
@@ -595,8 +740,9 @@ def main():
             # Show download buttons
             is_quarterly = report_type_stored == "Quarterly Breakdown"
             is_monthly = report_type_stored == "Monthly Breakdown"
+            is_weekly = report_type_stored == "Weekly Breakdown"
             
-            if (is_quarterly or is_monthly) and xlsx_path and Path(xlsx_path).exists():
+            if (is_quarterly or is_monthly or is_weekly) and xlsx_path and Path(xlsx_path).exists():
                 col1, col2 = st.columns(2)
                 with col1:
                     st.download_button(
@@ -629,7 +775,9 @@ def main():
                 )
             
             # Display preview based on report type
-            if is_monthly:
+            if is_weekly:
+                display_report_preview(Path(csv_path), csv_data, report_type="weekly", xlsx_path=Path(xlsx_path) if xlsx_path else None)
+            elif is_monthly:
                 display_report_preview(Path(csv_path), csv_data, report_type="monthly", xlsx_path=Path(xlsx_path) if xlsx_path else None)
             elif is_quarterly:
                 display_report_preview(Path(csv_path), csv_data, report_type="quarterly", xlsx_path=Path(xlsx_path) if xlsx_path else None)

@@ -123,12 +123,15 @@ class TimeEntry:
     hours: float
     work_type: WorkType
     issues: List[str] = field(default_factory=list)
+    week_hours: Dict[int, float] = field(default_factory=dict)  # week_number -> hours
     
-    def add_hours(self, hours: float, issue_key: Optional[str] = None):
+    def add_hours(self, hours: float, issue_key: Optional[str] = None, week: Optional[int] = None):
         """Add hours to this entry"""
         self.hours += hours
         if issue_key and issue_key not in self.issues:
             self.issues.append(issue_key)
+        if week is not None:
+            self.week_hours[week] = self.week_hours.get(week, 0) + hours
 
 
 @dataclass
