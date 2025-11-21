@@ -1,0 +1,311 @@
+"""
+Streamlit UI components
+"""
+
+import streamlit as st
+import pandas as pd
+import logging
+from pathlib import Path
+from calendar import month_name
+
+from .formatters import parse_split_csv, calculate_summary_stats, transform_to_multiindex
+
+logger = logging.getLogger(__name__)
+
+
+def show_config_error(error_msg: str):
+    """Display configuration error with helpful instructions"""
+    st.error(":warning: Missing Configuration")
+    st.markdown("""
+    Please set these environment variables:
+    ```
+    JIRA_URL=https://your-company.atlassian.net
+    JIRA_USERNAME=your-email@company.com
+    JIRA_API_TOKEN=your-api-token
+    ```
+    
+    **For Docker:** Make sure your `.env` file exists and restart:
+    ```bash
+    make web-stop
+    make web
+    ```
+    """)
+    st.error(f"Error details: {error_msg}")
+    st.stop()
+
+
+def _display_dataframe_with_styling(df: pd.DataFrame, project_col, is_multilevel: bool = False):
+    """Helper to display dataframe with TOTAL row styling"""
+    
+    def highlight_total(row):
+        try:
+            return ['background-color: #f0f2f6; font-weight: bold' if row.get(project_col) == 'TOTAL' else '' for _ in row]
+        except:
+            return ['' for _ in row]
+    
+    def format_number(val):
+        if val is None or val == '' or val == '-':
+            return '-'
+        try:
+            return f'{float(val):.1f}'
+        except (ValueError, TypeError):
+            return str(val)
+    
+    # Build format dict based on column type
+    if is_multilevel:
+        format_dict = {col: format_number for col in df.columns 
+                      if not str(col[0]).startswith('Project') and not str(col[0]).startswith('Component')}
+    else:
+        format_dict = {col: format_number for col in df.columns 
+                      if not str(col).startswith('Project') and not str(col).startswith('Component')}
+    
+    try:
+        styled_df = df.style.apply(highlight_total, axis=1).format(format_dict)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=250)
+    except Exception:
+        # Fallback: display without styling
+        st.dataframe(df, use_container_width=True, hide_index=True, height=250)
+
+
+def _parse_xlsx_sheet(ws, is_multilevel: bool = False):
+    """Parse XLSX sheet into dev and maint dataframes"""
+    dev_data = []
+    maint_data = []
+    current_section = None
+    header_row = None
+    header_row_2 = None
+    
+    for row in ws.iter_rows(values_only=True):
+        # Skip empty rows
+        if not any(row):
+            continue
+        
+        # Check for section headers
+        if row[0] == 'DEVELOPMENT':
+            current_section = 'dev'
+            header_row = None
+            header_row_2 = None
+            continue
+        elif row[0] == 'MAINTENANCE':
+            current_section = 'maint'
+            header_row = None
+            header_row_2 = None
+            continue
+        
+        # Capture header rows
+        if current_section and header_row is None and row[0] in ['Project', 'TOTAL']:
+            if row[0] == 'Project':
+                header_row = row
+            continue
+        
+        # Capture second header row for weekly
+        if current_section and is_multilevel and header_row and header_row_2 is None and row[0] in ['Project', 'TOTAL']:
+            if row[0] == 'Project':
+                header_row_2 = row
+            continue
+        
+        # Capture data rows
+        if current_section and header_row and row[0] not in [None, '', 'DEVELOPMENT', 'MAINTENANCE']:
+            if current_section == 'dev':
+                dev_data.append(row)
+            elif current_section == 'maint':
+                maint_data.append(row)
+    
+    return dev_data, maint_data, header_row, header_row_2
+
+
+def _create_multilevel_columns():
+    """Create multi-level column headers for weekly breakdown"""
+    month_names_short = [month_name[i][:3] for i in range(1, 13)]
+    
+    multi_columns = []
+    multi_columns.append(('', 'Project'))
+    multi_columns.append(('', 'Component'))
+    
+    # 12 months × 5 weeks = 60 week columns
+    for month_abbr in month_names_short:
+        for week in range(1, 6):
+            multi_columns.append((month_abbr, f'W{week}'))
+    
+    multi_columns.append(('', 'Total'))
+    return multi_columns
+
+
+def _create_single_level_columns(header_row):
+    """Create single-level column headers with unique names"""
+    unique_headers = []
+    seen = {}
+    for i, col in enumerate(header_row):
+        if col is None or col == '':
+            col = f'Column_{i}'
+        
+        col_str = str(col)
+        if col_str in seen:
+            seen[col_str] += 1
+            unique_headers.append(f"{col_str}_{seen[col_str]}")
+        else:
+            seen[col_str] = 0
+            unique_headers.append(col_str)
+    
+    return unique_headers
+
+
+def display_monthly_breakdown_preview(xlsx_path: Path, report_type: str = "monthly"):
+    """Display monthly/weekly breakdown preview with team member selector"""
+    try:
+        from openpyxl import load_workbook
+        
+        wb = load_workbook(xlsx_path, read_only=False)
+        sheet_names = wb.sheetnames
+        
+        if not sheet_names:
+            st.warning("No data found in the report")
+            return
+        
+        # Team member selector
+        breakdown_type = "weekly" if report_type == "weekly" else "monthly"
+        selected_member = st.selectbox(
+            "Select Team Member",
+            options=sheet_names,
+            help=f"Choose a team member to view their {breakdown_type} breakdown"
+        )
+        
+        # Read the selected sheet
+        ws = wb[selected_member]
+        is_multilevel = report_type == "weekly"
+        
+        # Parse sections
+        dev_data, maint_data, header_row, header_row_2 = _parse_xlsx_sheet(ws, is_multilevel)
+        
+        # Display Development table
+        if dev_data and header_row:
+            st.markdown("### :wrench: Development")
+            
+            if is_multilevel and header_row_2:
+                multi_columns = _create_multilevel_columns()
+                dev_df = pd.DataFrame(dev_data)
+                dev_df.columns = pd.MultiIndex.from_tuples(multi_columns)
+                project_col = ('', 'Project')
+            else:
+                unique_headers = _create_single_level_columns(header_row)
+                dev_df = pd.DataFrame(dev_data, columns=unique_headers)
+                project_col = next((c for c in dev_df.columns if str(c).startswith('Project')), 'Project')
+            
+            _display_dataframe_with_styling(dev_df, project_col, is_multilevel and header_row_2)
+        
+        # Display Maintenance table
+        if maint_data and header_row:
+            st.markdown("### :hammer_and_wrench: Maintenance")
+            
+            if is_multilevel and header_row_2:
+                multi_columns = _create_multilevel_columns()
+                maint_df = pd.DataFrame(maint_data)
+                maint_df.columns = pd.MultiIndex.from_tuples(multi_columns)
+                project_col = ('', 'Project')
+            else:
+                unique_headers = _create_single_level_columns(header_row)
+                maint_df = pd.DataFrame(maint_data, columns=unique_headers)
+                project_col = next((c for c in maint_df.columns if str(c).startswith('Project')), 'Project')
+            
+            _display_dataframe_with_styling(maint_df, project_col, is_multilevel and header_row_2)
+        
+        wb.close()
+        
+    except Exception as e:
+        st.warning(f"Could not display monthly breakdown preview: {e}")
+        logger.exception("Monthly breakdown preview failed")
+
+
+def display_report_preview(result_path: Path, csv_data: bytes, report_type: str = "yearly", xlsx_path: Path = None):
+    """Display report preview with separate tables for Development and Maintenance"""
+    # Display title with report type
+    report_type_display = {
+        "yearly": "Yearly Overview",
+        "quarterly": "Quarterly Breakdown",
+        "monthly": "Monthly Breakdown",
+        "weekly": "Weekly Breakdown"
+    }.get(report_type, "Report")
+    
+    st.subheader(f":clipboard: Report Preview - {report_type_display}")
+    
+    # For monthly or weekly breakdown, show XLSX preview with team member selector
+    if report_type in ["monthly", "weekly"] and xlsx_path and Path(xlsx_path).exists():
+        display_monthly_breakdown_preview(xlsx_path, report_type)
+        return
+    
+    try:
+        # Parse the split CSV
+        dev_df, maint_df = parse_split_csv(result_path)
+        stats = calculate_summary_stats(dev_df, maint_df)
+        
+        # Display summary metrics in two rows
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Projects", stats['projects'])
+        with col2:
+            st.metric("Components", stats['components'])
+        with col3:
+            st.metric("Team Members", stats['team_members'])
+        
+        # Display hours breakdown in one row
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Development Hours", f"{stats['dev_hours']:.1f}h")
+        with col2:
+            st.metric("Maintenance Hours", f"{stats['maint_hours']:.1f}h")
+        with col3:
+            st.metric("Total Hours", f"{stats['total_hours']:.1f}h")
+        
+        # Display Development table
+        if not dev_df.empty:
+            st.markdown("### :wrench: Development")
+            dev_display = transform_to_multiindex(dev_df)
+            
+            def highlight_total(row):
+                if isinstance(dev_display.columns, pd.MultiIndex):
+                    is_total = row[('', 'Project')] == 'TOTAL'
+                else:
+                    is_total = row['Project'] == 'TOTAL'
+                return ['background-color: #f0f2f6; font-weight: bold' if is_total else '' for _ in row]
+            
+            styled_dev = dev_display.style.apply(highlight_total, axis=1)
+            
+            # Format numeric columns
+            if isinstance(dev_display.columns, pd.MultiIndex):
+                format_dict = {col: '{:.1f}' for col in dev_display.columns if col not in [('', 'Project'), ('', 'Component')]}
+            else:
+                format_dict = {col: '{:.1f}' for col in dev_display.columns if col not in ['Project', 'Component']}
+            
+            styled_dev = styled_dev.format(format_dict, na_rep='-')
+                        
+            st.dataframe(styled_dev, use_container_width=True, hide_index=True, height=300)
+        
+        # Display Maintenance table
+        if not maint_df.empty:
+            st.markdown("### :hammer_and_wrench: Maintenance")
+            maint_display = transform_to_multiindex(maint_df)
+            
+            def highlight_total(row):
+                if isinstance(maint_display.columns, pd.MultiIndex):
+                    is_total = row[('', 'Project')] == 'TOTAL'
+                else:
+                    is_total = row['Project'] == 'TOTAL'
+                return ['background-color: #f0f2f6; font-weight: bold' if is_total else '' for _ in row]
+            
+            styled_maint = maint_display.style.apply(highlight_total, axis=1)
+            
+            # Format numeric columns
+            if isinstance(maint_display.columns, pd.MultiIndex):
+                format_dict = {col: '{:.1f}' for col in maint_display.columns if col not in [('', 'Project'), ('', 'Component')]}
+            else:
+                format_dict = {col: '{:.1f}' for col in maint_display.columns if col not in ['Project', 'Component']}
+            
+            styled_maint = styled_maint.format(format_dict, na_rep='-')
+                        
+            st.dataframe(styled_maint, use_container_width=True, hide_index=True, height=300)
+        
+    except Exception as e:
+        st.warning(f"Could not display preview: {e}")
+        logger.exception("Preview display failed")
+        with st.expander(":page_facing_up: Raw CSV Preview"):
+            st.code(csv_data.decode('utf-8')[:1000] + "\n...", language="csv")

@@ -6,17 +6,59 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from enum import Enum
 import time
 
 from .config import Config
 from .jira_client import JiraClient, JiraClientError
 from .processors import WorklogProcessor
-from .exporters import YearlyOverviewExporter
+from .exporters import (
+    YearlyOverviewExporter,
+    QuarterlyBreakdownExporter,
+    MonthlyBreakdownExporter,
+    WeeklyBreakdownExporter
+)
 from .utils import get_month_range, format_date_for_jql
 from .models import YearlyReport, MonthlyReport
 
 logger = logging.getLogger(__name__)
+
+
+class ReportType(Enum):
+    """Enum for report types"""
+    YEARLY = "yearly"
+    QUARTERLY = "quarterly"
+    MONTHLY = "monthly"
+    WEEKLY = "weekly"
+
+
+class ReportConfig:
+    """Configuration for report generation"""
+    
+    EXPORTER_MAP = {
+        ReportType.YEARLY: YearlyOverviewExporter,
+        ReportType.QUARTERLY: QuarterlyBreakdownExporter,
+        ReportType.MONTHLY: MonthlyBreakdownExporter,
+        ReportType.WEEKLY: WeeklyBreakdownExporter
+    }
+    
+    DEFAULT_FILENAMES = {
+        ReportType.YEARLY: "manhour_report_{year}.csv",
+        ReportType.QUARTERLY: "quarterly_report_{year}.csv",
+        ReportType.MONTHLY: "monthly_breakdown_{year}.csv",
+        ReportType.WEEKLY: "weekly_breakdown_{year}.csv"
+    }
+    
+    @classmethod
+    def get_exporter_class(cls, report_type: ReportType):
+        """Get exporter class for report type"""
+        return cls.EXPORTER_MAP[report_type]
+    
+    @classmethod
+    def get_default_filename(cls, report_type: ReportType, year: int) -> str:
+        """Get default filename for report type"""
+        return cls.DEFAULT_FILENAMES[report_type].format(year=year)
 
 
 def fetch_month_project_data(
@@ -62,62 +104,19 @@ def fetch_month_project_data(
         return (project_key, month, [])
 
 
-def generate_csv_report(
-    config: Config,
-    year: int = None,
-    output_file: str = None,
-    max_workers: int = None
-):
-    """Generate CSV team overview report with parallel processing
-
+def _fetch_data_parallel(
+    client: JiraClient,
+    processor: WorklogProcessor,
+    project_keys: List[str],
+    year: int,
+    max_workers: int,
+    preserve_months: bool = False
+) -> dict:
+    """Fetch data in parallel for all month-project combinations
+    
     Args:
-        config: Configuration object
-        year: Report year
-        output_file: Output file path
-        max_workers: Number of parallel workers
+        preserve_months: If True, returns dict with month keys. If False, returns flat list.
     """
-
-    if year is None:
-        year = datetime.now().year
-
-    if max_workers is None:
-        max_workers = config.jira.max_workers
-
-    logger.info(f"Generating CSV team overview report for {year}")
-
-    # Initialize components with cache settings from config
-    client = JiraClient(
-        config.jira,
-        enable_cache=config.jira.enable_cache,
-        cache_dir=config.jira.cache_dir
-    )
-    processor = WorklogProcessor(config.report)
-
-    # Test connection
-    if not client.test_connection():
-        logger.error("Failed to connect to Jira")
-        return None
-
-    # Get project keys - fetch all if not specified
-    if config.jira.project_keys is None:
-        logger.info("No projects specified, fetching all accessible projects...")
-        project_keys = client.get_all_projects()
-        if not project_keys:
-            logger.error("No projects found")
-            return None
-    else:
-        project_keys = config.jira.project_keys
-
-    logger.info(f"Projects: {', '.join(project_keys)}")
-    logger.info(f"Using parallel processing with {max_workers} workers")
-    logger.info(f"Cache: {'enabled' if config.jira.enable_cache else 'disabled'}")
-
-    # Start timing
-    start_time = time.time()
-
-    # Collect all entries for the year using parallel processing
-    all_entries = []
-
     # Create tasks for all month-project combinations
     tasks = []
     for month in range(1, 13):
@@ -126,6 +125,12 @@ def generate_csv_report(
 
     logger.info(f"Processing {len(tasks)} month-project combinations in parallel...")
     fetch_start = time.time()
+
+    # Store entries by month if needed
+    if preserve_months:
+        entries_by_month = {month: [] for month in range(1, 13)}
+    else:
+        all_entries = []
 
     # Execute tasks in parallel
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -142,7 +147,10 @@ def generate_csv_report(
             completed += 1
             try:
                 _, result_month, entries = future.result()
-                all_entries.extend(entries)
+                if preserve_months:
+                    entries_by_month[result_month].extend(entries)
+                else:
+                    all_entries.extend(entries)
                 logger.info(f"Progress: {completed}/{len(tasks)} completed")
             except Exception as e:
                 logger.error(f"Task failed for {project_key} {year}-{month:02d}: {e}")
@@ -150,475 +158,207 @@ def generate_csv_report(
     fetch_time = time.time() - fetch_start
     logger.info(f"✓ Data fetching completed in {fetch_time:.1f}s")
 
+    return entries_by_month if preserve_months else all_entries
+
+
+def _initialize_client_and_processor(config: Config):
+    """Initialize Jira client and worklog processor"""
+    client = JiraClient(
+        config.jira,
+        enable_cache=config.jira.enable_cache,
+        cache_dir=config.jira.cache_dir
+    )
+    processor = WorklogProcessor(config.report)
+    
+    # Test connection
+    if not client.test_connection():
+        logger.error("Failed to connect to Jira")
+        return None, None
+    
+    return client, processor
+
+
+def _get_project_keys(config: Config, client: JiraClient) -> Optional[List[str]]:
+    """Get project keys from config or fetch all accessible projects"""
+    if config.jira.project_keys is None:
+        logger.info("No projects specified, fetching all accessible projects...")
+        project_keys = client.get_all_projects()
+        if not project_keys:
+            logger.error("No projects found")
+            return None
+    else:
+        project_keys = config.jira.project_keys
+    
+    logger.info(f"Projects: {', '.join(project_keys)}")
+    return project_keys
+
+
+def _create_yearly_report_from_entries(
+    entries_data,
+    year: int,
+    project_keys: List[str],
+    preserve_months: bool = False
+) -> YearlyReport:
+    """Create YearlyReport object from entries data
+    
+    Args:
+        entries_data: Either a list of entries (preserve_months=False) or dict of month->entries
+        preserve_months: Whether entries_data is organized by month
+    """
+    if preserve_months:
+        # Create monthly reports with entries
+        monthly_reports = []
+        for month in range(1, 13):
+            monthly_report = MonthlyReport(
+                year=year,
+                month=month,
+                project_keys=project_keys,
+                entries=entries_data[month]
+            )
+            monthly_reports.append(monthly_report)
+    else:
+        # Create a single dummy monthly report for yearly overview
+        dummy_report = MonthlyReport(
+            year=year,
+            month=1,
+            project_keys=project_keys,
+            entries=entries_data
+        )
+        monthly_reports = [dummy_report]
+    
+    return YearlyReport(
+        year=year,
+        project_keys=project_keys,
+        monthly_reports=monthly_reports
+    )
+
+
+def generate_report(
+    config: Config,
+    report_type: ReportType,
+    year: int = None,
+    output_file: str = None,
+    max_workers: int = None
+):
+    """Unified report generation function
+    
+    Args:
+        config: Configuration object
+        report_type: Type of report to generate
+        year: Report year (defaults to current year)
+        output_file: Output file path (defaults to standard naming)
+        max_workers: Number of parallel workers (defaults to config value)
+    
+    Returns:
+        For yearly reports: Path to CSV file
+        For other reports: Tuple of (csv_path, xlsx_path)
+    """
+    # Set defaults
+    if year is None:
+        year = datetime.now().year
+    if max_workers is None:
+        max_workers = config.jira.max_workers
+    if output_file is None:
+        output_file = f"reports/{ReportConfig.get_default_filename(report_type, year)}"
+
+    logger.info(f"Generating {report_type.value} report for {year}")
+
+    # Initialize components
+    client, processor = _initialize_client_and_processor(config)
+    if not client or not processor:
+        return None
+
+    # Get project keys
+    project_keys = _get_project_keys(config, client)
+    if not project_keys:
+        return None
+
+    logger.info(f"Using parallel processing with {max_workers} workers")
+    logger.info(f"Cache: {'enabled' if config.jira.enable_cache else 'disabled'}")
+
+    # Start timing
+    start_time = time.time()
+
+    # Fetch data - preserve months for all except yearly overview
+    preserve_months = report_type != ReportType.YEARLY
+    entries_data = _fetch_data_parallel(
+        client, processor, project_keys, year, max_workers, preserve_months
+    )
+
     # Check if we have data
-    if not all_entries:
+    if preserve_months:
+        has_data = any(entries_data.values())
+    else:
+        has_data = bool(entries_data)
+    
+    if not has_data:
         logger.warning("No data found for the specified period")
         return None
 
-    # Export to CSV
-    if output_file is None:
-        output_file = f"reports/manhour_report_{year}.csv"
-
+    # Export report
     output_path = Path(output_file)
-    # Ensure reports directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
     export_start = time.time()
 
-    # Aggregate entries
-    agg_start = time.time()
-    aggregated = processor.aggregate_entries(all_entries)
-    agg_time = time.time() - agg_start
-    logger.info(f"✓ Data aggregation completed in {agg_time:.1f}s")
-
-    # Log unique team members found
-    unique_authors_found = set(entry.author for entry in aggregated.values())
-    logger.info(f"Found {len(unique_authors_found)} unique team members:")
-    for author in sorted(unique_authors_found, key=lambda a: a.display_name):
-        logger.info(f"  - {author.display_name} ({author.email})")
+    # For yearly overview, aggregate entries first
+    if report_type == ReportType.YEARLY:
+        agg_start = time.time()
+        aggregated = processor.aggregate_entries(entries_data)
+        agg_time = time.time() - agg_start
+        logger.info(f"✓ Data aggregation completed in {agg_time:.1f}s")
+        
+        # Log unique team members
+        unique_authors = set(entry.author for entry in aggregated.values())
+        logger.info(f"Found {len(unique_authors)} unique team members:")
+        for author in sorted(unique_authors, key=lambda a: a.display_name):
+            logger.info(f"  - {author.display_name} ({author.email})")
+        
+        entries_data = list(aggregated.values())
 
     # Create yearly report
-    yearly_report = YearlyReport(
-        year=year,
-        project_keys=project_keys,
-        monthly_reports=[]
+    yearly_report = _create_yearly_report_from_entries(
+        entries_data, year, project_keys, preserve_months
     )
 
-    # Manually add entries to a dummy monthly report for export
-    dummy_report = MonthlyReport(
-        year=year,
-        month=1,
-        project_keys=project_keys,
-        entries=list(aggregated.values())
-    )
-    yearly_report.monthly_reports = [dummy_report]
-
-    exporter = YearlyOverviewExporter(output_path, filter_active_only=True)
-    result_path = exporter.export_yearly(yearly_report)
+    # Export using appropriate exporter
+    exporter_class = ReportConfig.get_exporter_class(report_type)
+    exporter = exporter_class(output_path, filter_active_only=True)
+    result = exporter.export_yearly(yearly_report)
 
     export_time = time.time() - export_start
     total_time = time.time() - start_time
 
-    logger.info(f"✅ CSV report generated: {result_path}")
-    logger.info(f"⏱️  Performance: Fetch={fetch_time:.1f}s, Export={export_time:.1f}s, Total={total_time:.1f}s")
-
-    return result_path
-
-
-
-def generate_quarterly_report(
-    config: Config,
-    year: int = None,
-    output_file: str = None,
-    max_workers: int = None
-):
-    """Generate CSV quarterly breakdown report with parallel processing
-
-    Args:
-        config: Configuration object
-        year: Report year
-        output_file: Output file path
-        max_workers: Number of parallel workers
-    """
-
-    if year is None:
-        year = datetime.now().year
-
-    if max_workers is None:
-        max_workers = config.jira.max_workers
-
-    logger.info(f"Generating CSV quarterly breakdown report for {year}")
-
-    # Initialize components with cache settings from config
-    client = JiraClient(
-        config.jira,
-        enable_cache=config.jira.enable_cache,
-        cache_dir=config.jira.cache_dir
-    )
-    processor = WorklogProcessor(config.report)
-
-    # Test connection
-    if not client.test_connection():
-        logger.error("Failed to connect to Jira")
-        return None
-
-    # Get project keys - fetch all if not specified
-    if config.jira.project_keys is None:
-        logger.info("No projects specified, fetching all accessible projects...")
-        project_keys = client.get_all_projects()
-        if not project_keys:
-            logger.error("No projects found")
-            return None
+    # Log results
+    if report_type == ReportType.YEARLY:
+        logger.info(f"✅ CSV report generated: {result}")
     else:
-        project_keys = config.jira.project_keys
-
-    logger.info(f"Projects: {', '.join(project_keys)}")
-    logger.info(f"Using parallel processing with {max_workers} workers")
-    logger.info(f"Cache: {'enabled' if config.jira.enable_cache else 'disabled'}")
-
-    # Start timing
-    start_time = time.time()
-
-    # Create tasks for all month-project combinations
-    tasks = []
-    for month in range(1, 13):
-        for project_key in project_keys:
-            tasks.append((project_key, year, month))
-
-    logger.info(f"Processing {len(tasks)} month-project combinations in parallel...")
-    fetch_start = time.time()
-
-    # Store entries by month to preserve month information
-    entries_by_month = {month: [] for month in range(1, 13)}
-
-    # Execute tasks in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        future_to_task = {
-            executor.submit(fetch_month_project_data, client, processor, pk, y, m, None): (pk, m)
-            for pk, y, m in tasks
-        }
-
-        # Collect results as they complete
-        completed = 0
-        for future in as_completed(future_to_task):
-            project_key, month = future_to_task[future]
-            completed += 1
-            try:
-                _, result_month, entries = future.result()
-                entries_by_month[result_month].extend(entries)
-                logger.info(f"Progress: {completed}/{len(tasks)} completed")
-            except Exception as e:
-                logger.error(f"Task failed for {project_key} {year}-{month:02d}: {e}")
-
-    fetch_time = time.time() - fetch_start
-    logger.info(f"✓ Data fetching completed in {fetch_time:.1f}s")
-
-    # Check if we have data
-    if not any(entries_by_month.values()):
-        logger.warning("No data found for the specified period")
-        return None
-
-    # Export to CSV
-    if output_file is None:
-        output_file = f"reports/quarterly_report_{year}.csv"
-
-    output_path = Path(output_file)
-    # Ensure reports directory exists
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    export_start = time.time()
-
-    # Create monthly reports with entries
-    monthly_reports = []
-    for month in range(1, 13):
-        monthly_report = MonthlyReport(
-            year=year,
-            month=month,
-            project_keys=project_keys,
-            entries=entries_by_month[month]
-        )
-        monthly_reports.append(monthly_report)
+        csv_path, xlsx_path = result
+        logger.info(f"✅ Reports generated:")
+        logger.info(f"   CSV: {csv_path}")
+        if xlsx_path:
+            logger.info(f"   XLSX: {xlsx_path}")
     
-    yearly_report = YearlyReport(
-        year=year,
-        project_keys=project_keys,
-        monthly_reports=monthly_reports
-    )
-    
-    # Use quarterly exporter
-    from .exporters import QuarterlyBreakdownExporter
-    exporter = QuarterlyBreakdownExporter(output_path, filter_active_only=True)
-    result_paths = exporter.export_yearly(yearly_report)
-    
-    # result_paths is a tuple (csv_path, xlsx_path)
-    csv_path, xlsx_path = result_paths
+    logger.info(f"⏱️  Performance: Export={export_time:.1f}s, Total={total_time:.1f}s")
 
-    export_time = time.time() - export_start
-    total_time = time.time() - start_time
-
-    logger.info(f"✅ Quarterly reports generated:")
-    logger.info(f"   CSV: {csv_path}")
-    if xlsx_path:
-        logger.info(f"   XLSX: {xlsx_path}")
-    logger.info(f"⏱️  Performance: Fetch={fetch_time:.1f}s, Export={export_time:.1f}s, Total={total_time:.1f}s")
-
-    return result_paths
+    return result
 
 
-
-def generate_monthly_breakdown_report(
-    config: Config,
-    year: int = None,
-    output_file: str = None,
-    max_workers: int = None
-):
-    """Generate CSV monthly breakdown report with parallel processing
-
-    Args:
-        config: Configuration object
-        year: Report year
-        output_file: Output file path
-        max_workers: Number of parallel workers
-    """
-
-    if year is None:
-        year = datetime.now().year
-
-    if max_workers is None:
-        max_workers = config.jira.max_workers
-
-    logger.info(f"Generating CSV monthly breakdown report for {year}")
-
-    # Initialize components with cache settings from config
-    client = JiraClient(
-        config.jira,
-        enable_cache=config.jira.enable_cache,
-        cache_dir=config.jira.cache_dir
-    )
-    processor = WorklogProcessor(config.report)
-
-    # Test connection
-    if not client.test_connection():
-        logger.error("Failed to connect to Jira")
-        return None
-
-    # Get project keys - fetch all if not specified
-    if config.jira.project_keys is None:
-        logger.info("No projects specified, fetching all accessible projects...")
-        project_keys = client.get_all_projects()
-        if not project_keys:
-            logger.error("No projects found")
-            return None
-    else:
-        project_keys = config.jira.project_keys
-
-    logger.info(f"Projects: {', '.join(project_keys)}")
-    logger.info(f"Using parallel processing with {max_workers} workers")
-    logger.info(f"Cache: {'enabled' if config.jira.enable_cache else 'disabled'}")
-
-    # Start timing
-    start_time = time.time()
-
-    # Create tasks for all month-project combinations
-    tasks = []
-    for month in range(1, 13):
-        for project_key in project_keys:
-            tasks.append((project_key, year, month))
-
-    logger.info(f"Processing {len(tasks)} month-project combinations in parallel...")
-    fetch_start = time.time()
-
-    # Store entries by month to preserve month information
-    entries_by_month = {month: [] for month in range(1, 13)}
-
-    # Execute tasks in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        future_to_task = {
-            executor.submit(fetch_month_project_data, client, processor, pk, y, m, None): (pk, m)
-            for pk, y, m in tasks
-        }
-
-        # Collect results as they complete
-        completed = 0
-        for future in as_completed(future_to_task):
-            project_key, month = future_to_task[future]
-            completed += 1
-            try:
-                _, result_month, entries = future.result()
-                entries_by_month[result_month].extend(entries)
-                logger.info(f"Progress: {completed}/{len(tasks)} completed")
-            except Exception as e:
-                logger.error(f"Task failed for {project_key} {year}-{month:02d}: {e}")
-
-    fetch_time = time.time() - fetch_start
-    logger.info(f"✓ Data fetching completed in {fetch_time:.1f}s")
-
-    # Check if we have data
-    if not any(entries_by_month.values()):
-        logger.warning("No data found for the specified period")
-        return None
-
-    # Export to CSV
-    if output_file is None:
-        output_file = f"reports/monthly_breakdown_{year}.csv"
-
-    output_path = Path(output_file)
-    # Ensure reports directory exists
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    export_start = time.time()
-
-    # Create monthly reports with entries
-    monthly_reports = []
-    for month in range(1, 13):
-        monthly_report = MonthlyReport(
-            year=year,
-            month=month,
-            project_keys=project_keys,
-            entries=entries_by_month[month]
-        )
-        monthly_reports.append(monthly_report)
-    
-    yearly_report = YearlyReport(
-        year=year,
-        project_keys=project_keys,
-        monthly_reports=monthly_reports
-    )
-    
-    # Use monthly breakdown exporter
-    from .exporters import MonthlyBreakdownExporter
-    exporter = MonthlyBreakdownExporter(output_path, filter_active_only=True)
-    result_paths = exporter.export_yearly(yearly_report)
-    
-    # result_paths is a tuple (csv_path, xlsx_path)
-    csv_path, xlsx_path = result_paths
-
-    export_time = time.time() - export_start
-    total_time = time.time() - start_time
-
-    logger.info(f"✅ Monthly breakdown reports generated:")
-    logger.info(f"   CSV: {csv_path}")
-    if xlsx_path:
-        logger.info(f"   XLSX: {xlsx_path}")
-    logger.info(f"⏱️  Performance: Fetch={fetch_time:.1f}s, Export={export_time:.1f}s, Total={total_time:.1f}s")
-
-    return result_paths
+# Convenience functions for backward compatibility
+def generate_csv_report(config: Config, year: int = None, output_file: str = None, max_workers: int = None):
+    """Generate CSV team overview report"""
+    return generate_report(config, ReportType.YEARLY, year, output_file, max_workers)
 
 
+def generate_quarterly_report(config: Config, year: int = None, output_file: str = None, max_workers: int = None):
+    """Generate CSV quarterly breakdown report"""
+    return generate_report(config, ReportType.QUARTERLY, year, output_file, max_workers)
 
-def generate_weekly_breakdown_report(
-    config: Config,
-    year: int = None,
-    output_file: str = None,
-    max_workers: int = None
-):
-    """Generate CSV weekly breakdown report with parallel processing
 
-    Args:
-        config: Configuration object
-        year: Report year
-        output_file: Output file path
-        max_workers: Number of parallel workers
-    """
+def generate_monthly_breakdown_report(config: Config, year: int = None, output_file: str = None, max_workers: int = None):
+    """Generate CSV monthly breakdown report"""
+    return generate_report(config, ReportType.MONTHLY, year, output_file, max_workers)
 
-    if year is None:
-        year = datetime.now().year
 
-    if max_workers is None:
-        max_workers = config.jira.max_workers
-
-    logger.info(f"Generating CSV weekly breakdown report for {year}")
-
-    # Initialize components with cache settings from config
-    client = JiraClient(
-        config.jira,
-        enable_cache=config.jira.enable_cache,
-        cache_dir=config.jira.cache_dir
-    )
-    processor = WorklogProcessor(config.report)
-
-    # Test connection
-    if not client.test_connection():
-        logger.error("Failed to connect to Jira")
-        return None
-
-    # Get project keys - fetch all if not specified
-    if config.jira.project_keys is None:
-        logger.info("No projects specified, fetching all accessible projects...")
-        project_keys = client.get_all_projects()
-        if not project_keys:
-            logger.error("No projects found")
-            return None
-    else:
-        project_keys = config.jira.project_keys
-
-    logger.info(f"Projects: {', '.join(project_keys)}")
-    logger.info(f"Using parallel processing with {max_workers} workers")
-    logger.info(f"Cache: {'enabled' if config.jira.enable_cache else 'disabled'}")
-
-    # Start timing
-    start_time = time.time()
-
-    # Create tasks for all month-project combinations
-    tasks = []
-    for month in range(1, 13):
-        for project_key in project_keys:
-            tasks.append((project_key, year, month))
-
-    logger.info(f"Processing {len(tasks)} month-project combinations in parallel...")
-    fetch_start = time.time()
-
-    # Store entries by month to preserve month information
-    entries_by_month = {month: [] for month in range(1, 13)}
-
-    # Execute tasks in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
-        future_to_task = {
-            executor.submit(fetch_month_project_data, client, processor, pk, y, m, None): (pk, m)
-            for pk, y, m in tasks
-        }
-
-        # Collect results as they complete
-        completed = 0
-        for future in as_completed(future_to_task):
-            project_key, month = future_to_task[future]
-            completed += 1
-            try:
-                _, result_month, entries = future.result()
-                entries_by_month[result_month].extend(entries)
-                logger.info(f"Progress: {completed}/{len(tasks)} completed")
-            except Exception as e:
-                logger.error(f"Task failed for {project_key} {year}-{month:02d}: {e}")
-
-    fetch_time = time.time() - fetch_start
-    logger.info(f"✓ Data fetching completed in {fetch_time:.1f}s")
-
-    # Check if we have data
-    if not any(entries_by_month.values()):
-        logger.warning("No data found for the specified period")
-        return None
-
-    # Export to CSV
-    if output_file is None:
-        output_file = f"reports/weekly_breakdown_{year}.csv"
-
-    output_path = Path(output_file)
-    # Ensure reports directory exists
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    export_start = time.time()
-
-    # Create monthly reports with entries
-    monthly_reports = []
-    for month in range(1, 13):
-        monthly_report = MonthlyReport(
-            year=year,
-            month=month,
-            project_keys=project_keys,
-            entries=entries_by_month[month]
-        )
-        monthly_reports.append(monthly_report)
-    
-    yearly_report = YearlyReport(
-        year=year,
-        project_keys=project_keys,
-        monthly_reports=monthly_reports
-    )
-    
-    # Use weekly breakdown exporter
-    from .exporters import WeeklyBreakdownExporter
-    exporter = WeeklyBreakdownExporter(output_path, filter_active_only=True)
-    result_paths = exporter.export_yearly(yearly_report)
-    
-    # result_paths is a tuple (csv_path, xlsx_path)
-    csv_path, xlsx_path = result_paths
-
-    export_time = time.time() - export_start
-    total_time = time.time() - start_time
-
-    logger.info(f"✅ Weekly breakdown reports generated:")
-    logger.info(f"   CSV: {csv_path}")
-    if xlsx_path:
-        logger.info(f"   XLSX: {xlsx_path}")
-    logger.info(f"⏱️  Performance: Fetch={fetch_time:.1f}s, Export={export_time:.1f}s, Total={total_time:.1f}s")
-
-    return result_paths
+def generate_weekly_breakdown_report(config: Config, year: int = None, output_file: str = None, max_workers: int = None):
+    """Generate CSV weekly breakdown report"""
+    return generate_report(config, ReportType.WEEKLY, year, output_file, max_workers)
