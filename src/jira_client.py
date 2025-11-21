@@ -4,7 +4,7 @@ Jira API client for fetching worklog data
 
 import logging
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import requests
 from requests.auth import HTTPBasicAuth
 import json
@@ -15,6 +15,9 @@ from .config import JiraConfig
 from .models import Issue, Worklog, Component, Author, WorkType
 
 logger = logging.getLogger(__name__)
+
+# Malaysia timezone (UTC+8)
+MALAYSIA_TZ = timezone(timedelta(hours=8))
 
 
 class JiraClientError(Exception):
@@ -42,8 +45,27 @@ class JiraClient:
         self.base_url = f"{config.url}/rest/api/3"
         self.enable_cache = enable_cache
         self.cache_dir = Path(cache_dir)
+        self.cache_hit_count = 0
+        self.cache_miss_count = 0
         if enable_cache:
             self.cache_dir.mkdir(exist_ok=True)
+    
+    def get_cache_timestamp(self) -> Optional[datetime]:
+        """Get the oldest cache file timestamp in Malaysia time"""
+        if not self.enable_cache or not self.cache_dir.exists():
+            return None
+        
+        cache_files = list(self.cache_dir.glob("*.json"))
+        if not cache_files:
+            return None
+        
+        # Get the oldest cache file timestamp and convert to Malaysia time
+        oldest_time = min(f.stat().st_mtime for f in cache_files)
+        return datetime.fromtimestamp(oldest_time, tz=MALAYSIA_TZ)
+    
+    def is_using_cache(self) -> bool:
+        """Check if any cache was used in this session"""
+        return self.cache_hit_count > 0
     
     def _get_cache_key(self, endpoint: str, params: Optional[Dict] = None) -> str:
         """Generate cache key from endpoint and params"""
@@ -60,6 +82,7 @@ class JiraClient:
             try:
                 with open(cache_file, 'r') as f:
                     logger.debug(f"Cache hit: {cache_key}")
+                    self.cache_hit_count += 1
                     return json.load(f)
             except Exception as e:
                 logger.warning(f"Cache read error: {e}")
@@ -104,6 +127,7 @@ class JiraClient:
             # Save to cache
             if use_cache and method == "GET":
                 self._save_to_cache(cache_key, data)
+                self.cache_miss_count += 1
             return data
         
         except requests.exceptions.HTTPError as e:

@@ -73,6 +73,9 @@ class QuarterlyBreakdownExporter(BaseExporter):
         with open(self.output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
+            # Write metadata header
+            self._write_metadata_header(writer, report)
+            
             # Header row - format names in Title Case with quarters
             header = ['Project', 'Component']
             for author in sorted_authors:
@@ -278,10 +281,19 @@ class QuarterlyBreakdownExporter(BaseExporter):
         ws = wb.active
         ws.title = "Quarterly Report"
         
-        # Create header rows once at the top
-        self._create_header_rows(ws, sorted_authors, row_start=1)
+        # Add metadata header to XLSX
+        current_row = 1
+        if report and report.fetch_timestamp:
+            timestamp_str = report.fetch_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            ws[f'A{current_row}'] = f"Generated: {timestamp_str} (Malaysia Time)"
+            current_row += 1
+            current_row += 1  # Empty row
         
-        current_row = 3  # Start after headers
+        # Create header rows once at the top
+        header_start = current_row
+        self._create_header_rows(ws, sorted_authors, row_start=header_start)
+        
+        current_row = header_start + 2  # Start after headers (2 header rows)
         
         # Development section
         dev_data = data_by_type[WorkType.DEVELOPMENT]

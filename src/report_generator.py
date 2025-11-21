@@ -4,7 +4,7 @@ Report generation module for Jira time tracking
 
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Optional
 from enum import Enum
@@ -23,6 +23,9 @@ from .utils import get_month_range, format_date_for_jql
 from .models import YearlyReport, MonthlyReport
 
 logger = logging.getLogger(__name__)
+
+# Malaysia timezone (UTC+8)
+MALAYSIA_TZ = timezone(timedelta(hours=8))
 
 
 class ReportType(Enum):
@@ -315,10 +318,15 @@ def generate_report(
         
         entries_data = list(aggregated.values())
 
-    # Create yearly report
+    # Create yearly report with timestamp metadata
     yearly_report = _create_yearly_report_from_entries(
         entries_data, year, project_keys, preserve_months
     )
+    
+    # Add timestamp metadata (Malaysia time)
+    yearly_report.fetch_timestamp = datetime.now(MALAYSIA_TZ)
+    yearly_report.from_cache = client.is_using_cache()
+    yearly_report.cache_timestamp = client.get_cache_timestamp()
 
     # Export using appropriate exporter
     exporter_class = ReportConfig.get_exporter_class(report_type)

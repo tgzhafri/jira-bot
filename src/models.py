@@ -174,6 +174,9 @@ class YearlyReport:
     year: int
     project_keys: List[str]
     monthly_reports: List[MonthlyReport]
+    fetch_timestamp: Optional[datetime] = None
+    from_cache: bool = False
+    cache_timestamp: Optional[datetime] = None
     
     def get_total_hours(self) -> float:
         """Get total hours for the year"""

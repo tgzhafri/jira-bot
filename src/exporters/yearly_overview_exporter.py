@@ -62,6 +62,9 @@ class YearlyOverviewExporter(BaseExporter):
         with open(self.output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             
+            # Write metadata header
+            self._write_metadata_header(writer, report)
+            
             # Header row - format names in Title Case
             header = ['Project', 'Component'] + [a.display_name.title() for a in sorted_authors]
             

@@ -72,10 +72,10 @@ class WeeklyBreakdownExporter(BaseExporter):
         sorted_authors = sorted(data_by_author.keys(), key=lambda a: a.display_name)
         
         # Export to CSV (simple format with author column)
-        self._export_to_csv(data_by_author, sorted_authors)
+        self._export_to_csv(data_by_author, sorted_authors, report)
         
         # Export to XLSX (one sheet per author with multi-level headers)
-        xlsx_path = self._export_to_xlsx(data_by_author, sorted_authors)
+        xlsx_path = self._export_to_xlsx(data_by_author, sorted_authors, report)
         
         logger.info(f"Weekly breakdown reports exported")
         logger.info(f"  CSV: {self.output_path}")
@@ -85,7 +85,7 @@ class WeeklyBreakdownExporter(BaseExporter):
         
         return (self.output_path, xlsx_path)
     
-    def _export_to_csv(self, data_by_author: dict, sorted_authors: list):
+    def _export_to_csv(self, data_by_author: dict, sorted_authors: list, report: YearlyReport = None):
         """Export to CSV format with flat week headers (JanW1, JanW2, etc.)"""
         
         month_names = [month_name[i][:3] for i in range(1, 13)]
@@ -99,6 +99,10 @@ class WeeklyBreakdownExporter(BaseExporter):
         
         with open(self.output_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
+            
+            # Write metadata header
+            if report:
+                self._write_metadata_header(writer, report)
             
             # Header
             header = ['Team Member', 'Work Type', 'Project', 'Component'] + week_headers + ['Total']
@@ -275,7 +279,7 @@ class WeeklyBreakdownExporter(BaseExporter):
         
         return row_idx + 1
     
-    def _export_to_xlsx(self, data_by_author: dict, sorted_authors: list) -> Path:
+    def _export_to_xlsx(self, data_by_author: dict, sorted_authors: list, report: YearlyReport = None) -> Path:
         """Export to XLSX format with one sheet per team member and multi-level headers"""
         
         if not XLSX_AVAILABLE:
@@ -291,8 +295,15 @@ class WeeklyBreakdownExporter(BaseExporter):
             sheet_name = author.display_name.title()[:31]  # Excel sheet name limit
             ws = wb.create_sheet(title=sheet_name)
             
-            author_data = data_by_author[author]
+            # Add metadata header to XLSX
             current_row = 1
+            if report and report.fetch_timestamp:
+                timestamp_str = report.fetch_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                ws[f'A{current_row}'] = f"Generated: {timestamp_str} (Malaysia Time)"
+                current_row += 1
+                current_row += 1  # Empty row
+            
+            author_data = data_by_author[author]
             
             # Development section
             dev_data = author_data[WorkType.DEVELOPMENT]

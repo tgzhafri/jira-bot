@@ -8,16 +8,27 @@ from io import StringIO
 
 
 def parse_split_csv(file_path: Path) -> tuple:
-    """Parse CSV file split by Development and Maintenance sections"""
+    """Parse CSV file split by Development and Maintenance sections
+    
+    Returns:
+        tuple: (dev_df, maint_df, metadata_dict)
+    """
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     
     dev_lines = []
     maint_lines = []
     current_section = None
+    metadata = {}
     
     for line in lines:
         stripped = line.strip()
+        
+        # Parse metadata lines
+        if stripped.startswith('Generated:'):
+            metadata['generated'] = stripped.replace('Generated:', '').strip()
+            continue
+        
         if stripped == 'DEVELOPMENT':
             current_section = 'dev'
             continue
@@ -36,7 +47,7 @@ def parse_split_csv(file_path: Path) -> tuple:
     dev_df = pd.read_csv(StringIO(''.join(dev_lines))) if dev_lines else pd.DataFrame()
     maint_df = pd.read_csv(StringIO(''.join(maint_lines))) if maint_lines else pd.DataFrame()
     
-    return dev_df, maint_df
+    return dev_df, maint_df, metadata
 
 
 def calculate_summary_stats(dev_df: pd.DataFrame, maint_df: pd.DataFrame) -> dict:

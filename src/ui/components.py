@@ -68,17 +68,28 @@ def _display_dataframe_with_styling(df: pd.DataFrame, project_col, is_multilevel
 
 
 def _parse_xlsx_sheet(ws, is_multilevel: bool = False):
-    """Parse XLSX sheet into dev and maint dataframes"""
+    """Parse XLSX sheet into dev and maint dataframes, and extract metadata
+    
+    Returns:
+        tuple: (dev_data, maint_data, header_row, header_row_2, metadata)
+    """
     dev_data = []
     maint_data = []
     current_section = None
     header_row = None
     header_row_2 = None
+    metadata = {}
     
     for row in ws.iter_rows(values_only=True):
         # Skip empty rows
         if not any(row):
             continue
+        
+        # Parse metadata lines (before sections start)
+        if row[0] and isinstance(row[0], str):
+            if row[0].startswith('Generated:'):
+                metadata['generated'] = row[0].replace('Generated:', '').strip()
+                continue
         
         # Check for section headers
         if row[0] == 'DEVELOPMENT':
@@ -111,7 +122,7 @@ def _parse_xlsx_sheet(ws, is_multilevel: bool = False):
             elif current_section == 'maint':
                 maint_data.append(row)
     
-    return dev_data, maint_data, header_row, header_row_2
+    return dev_data, maint_data, header_row, header_row_2, metadata
 
 
 def _create_multilevel_columns():
@@ -150,6 +161,16 @@ def _create_single_level_columns(header_row):
     return unique_headers
 
 
+def _display_metadata_info(metadata: dict):
+    """Display metadata information in a consistent format"""
+    if not metadata or 'generated' not in metadata:
+        return
+    
+    # Display timestamp (already includes Malaysia Time label from export)
+    st.info(f":clock3: {metadata['generated']}")
+    st.markdown("---")
+
+
 def display_monthly_breakdown_preview(xlsx_path: Path, report_type: str = "monthly"):
     """Display monthly/weekly breakdown preview with team member selector"""
     try:
@@ -174,8 +195,11 @@ def display_monthly_breakdown_preview(xlsx_path: Path, report_type: str = "month
         ws = wb[selected_member]
         is_multilevel = report_type == "weekly"
         
-        # Parse sections
-        dev_data, maint_data, header_row, header_row_2 = _parse_xlsx_sheet(ws, is_multilevel)
+        # Parse sections with metadata
+        dev_data, maint_data, header_row, header_row_2, metadata = _parse_xlsx_sheet(ws, is_multilevel)
+        
+        # Display metadata
+        _display_metadata_info(metadata)
         
         # Display Development table
         if dev_data and header_row:
@@ -235,7 +259,10 @@ def display_report_preview(result_path: Path, csv_data: bytes, report_type: str 
     
     try:
         # Parse the split CSV
-        dev_df, maint_df = parse_split_csv(result_path)
+        dev_df, maint_df, metadata = parse_split_csv(result_path)
+        
+        # Display metadata using shared function
+        _display_metadata_info(metadata)
         stats = calculate_summary_stats(dev_df, maint_df)
         
         # Display summary metrics in two rows

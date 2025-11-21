@@ -28,3 +28,16 @@ class BaseExporter(ABC):
     def _ensure_directory(self):
         """Ensure output directory exists"""
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    def _write_metadata_header(self, writer, report):
+        """Write metadata header with timestamp information to CSV
+        
+        Args:
+            writer: CSV writer object
+            report: YearlyReport or MonthlyReport with timestamp metadata
+        """
+        if report.fetch_timestamp:
+            # Format timestamp without timezone suffix for cleaner display
+            timestamp_str = report.fetch_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            writer.writerow([f"Generated: {timestamp_str} (Malaysia Time)"])
+            writer.writerow([])  # Empty row separator
