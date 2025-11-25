@@ -2,14 +2,15 @@
 Date utility functions
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Tuple
+
+# Malaysia timezone (UTC+8)
+MALAYSIA_TZ = timezone(timedelta(hours=8))
 
 
 def get_month_range(year: int, month: int) -> Tuple[datetime, datetime]:
     """Get start and end datetime for a month (timezone-aware UTC)"""
-    from datetime import timezone
-    
     start_date = datetime(year, month, 1, tzinfo=timezone.utc)
     
     if month == 12:
@@ -25,8 +26,6 @@ def get_month_range(year: int, month: int) -> Tuple[datetime, datetime]:
 
 def get_year_range(year: int) -> Tuple[datetime, datetime]:
     """Get start and end datetime for a year (timezone-aware UTC)"""
-    from datetime import timezone
-    
     start_date = datetime(year, 1, 1, tzinfo=timezone.utc)
     end_date = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     return start_date, end_date

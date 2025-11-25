@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 from enum import Enum
 import time
 
@@ -20,20 +20,18 @@ from .exporters import (
     WeeklyBreakdownExporter
 )
 from .utils import get_month_range, format_date_for_jql
+from .utils.date_utils import MALAYSIA_TZ
 from .models import YearlyReport, MonthlyReport
 
 logger = logging.getLogger(__name__)
 
-# Malaysia timezone (UTC+8)
-MALAYSIA_TZ = timezone(timedelta(hours=8))
-
 
 class ReportType(Enum):
     """Enum for report types"""
-    YEARLY = "yearly"
-    QUARTERLY = "quarterly"
-    MONTHLY = "monthly"
-    WEEKLY = "weekly"
+    YEARLY = "Yearly Overview"
+    QUARTERLY = "Quarterly Breakdown"
+    MONTHLY = "Monthly Breakdown"
+    WEEKLY = "Weekly Breakdown"
 
 
 class ReportConfig:
@@ -236,6 +234,22 @@ def _create_yearly_report_from_entries(
     )
 
 
+def _process_yearly_data(processor: WorklogProcessor, entries_data: List) -> List:
+    """Aggregate entries for yearly report"""
+    agg_start = time.time()
+    aggregated = processor.aggregate_entries(entries_data)
+    agg_time = time.time() - agg_start
+    logger.info(f"✓ Data aggregation completed in {agg_time:.1f}s")
+    
+    # Log unique team members
+    unique_authors = set(entry.author for entry in aggregated.values())
+    logger.info(f"Found {len(unique_authors)} unique team members:")
+    for author in sorted(unique_authors, key=lambda a: a.display_name):
+        logger.info(f"  - {author.display_name} ({author.email})")
+    
+    return list(aggregated.values())
+
+
 def generate_report(
     config: Config,
     report_type: ReportType,
@@ -305,18 +319,7 @@ def generate_report(
 
     # For yearly overview, aggregate entries first
     if report_type == ReportType.YEARLY:
-        agg_start = time.time()
-        aggregated = processor.aggregate_entries(entries_data)
-        agg_time = time.time() - agg_start
-        logger.info(f"✓ Data aggregation completed in {agg_time:.1f}s")
-        
-        # Log unique team members
-        unique_authors = set(entry.author for entry in aggregated.values())
-        logger.info(f"Found {len(unique_authors)} unique team members:")
-        for author in sorted(unique_authors, key=lambda a: a.display_name):
-            logger.info(f"  - {author.display_name} ({author.email})")
-        
-        entries_data = list(aggregated.values())
+        entries_data = _process_yearly_data(processor, entries_data)
 
     # Create yearly report with timestamp metadata
     yearly_report = _create_yearly_report_from_entries(

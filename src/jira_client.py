@@ -3,7 +3,7 @@ Jira API client for fetching worklog data
 """
 
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime, timezone, timedelta
 import requests
 from requests.auth import HTTPBasicAuth
@@ -13,11 +13,9 @@ from pathlib import Path
 
 from .config import JiraConfig
 from .models import Issue, Worklog, Component, Author, WorkType
+from .utils.date_utils import MALAYSIA_TZ
 
 logger = logging.getLogger(__name__)
-
-# Malaysia timezone (UTC+8)
-MALAYSIA_TZ = timezone(timedelta(hours=8))
 
 
 class JiraClientError(Exception):
@@ -206,12 +204,8 @@ class JiraClient:
         logger.info(f"Fetched {len(issues)} issues for {project_key}")
         return issues
     
-    def parse_issue(self, issue_data: Dict, fetch_all_worklogs: bool = True) -> Issue:
-        """Parse raw issue data into Issue model"""
-        fields = issue_data.get('fields', {})
-        issue_key = issue_data.get('key')
-        
-        # Parse components
+    def _parse_components(self, fields: Dict) -> List[Component]:
+        """Parse components from issue fields"""
         components = [
             Component(name=c['name'], id=c.get('id'))
             for c in fields.get('components', [])
@@ -220,31 +214,38 @@ class JiraClient:
         if not components:
             components = [Component(name='Unassigned')]
         
-        # Parse worklogs - intelligently fetch all if needed
+        return components
+
+    def _get_author_active_status(self, author_data: Dict) -> bool:
+        """Get active status for an author"""
+        active = author_data.get('active')
+        if active is None and author_data.get('accountId'):
+            # Fetch user details to get active status
+            user_details = self.get_user_details(author_data.get('accountId'))
+            active = user_details.get('active', True)
+        elif active is None:
+            # No account ID and no active field, default to True
+            active = True
+        return active
+
+    def _parse_worklogs(self, issue_data: Dict, fetch_all_worklogs: bool) -> List[Worklog]:
+        """Parse worklogs from issue data"""
+        fields = issue_data.get('fields', {})
+        issue_key = issue_data.get('key')
+        
         worklogs = []
         worklog_data = fields.get('worklog', {})
         worklog_list = worklog_data.get('worklogs', [])
         total_worklogs = worklog_data.get('total', len(worklog_list))
         
         # Only fetch all worklogs if there are MORE than what's in the response
-        # This optimization prevents unnecessary API calls
         if fetch_all_worklogs and total_worklogs > len(worklog_list):
             logger.debug(f"{issue_key}: Fetching all {total_worklogs} worklogs (response had {len(worklog_list)})")
             worklog_list = self.get_all_worklogs_for_issue(issue_key)
-        # No warning needed - we have all the worklogs we need
         
         for wl in worklog_list:
             author_data = wl.get('author', {})
-            
-            # Get active status - fetch from user API if not in worklog response
-            active = author_data.get('active')
-            if active is None and author_data.get('accountId'):
-                # Fetch user details to get active status
-                user_details = self.get_user_details(author_data.get('accountId'))
-                active = user_details.get('active', True)
-            elif active is None:
-                # No account ID and no active field, default to True
-                active = True
+            active = self._get_author_active_status(author_data)
             
             author = Author(
                 email=author_data.get('emailAddress', 'unknown'),
@@ -258,12 +259,19 @@ class JiraClient:
                 author=author,
                 time_spent_seconds=wl.get('timeSpentSeconds', 0),
                 started=datetime.fromisoformat(wl['started'].replace('Z', '+00:00')),
-                issue_key=issue_data.get('key'),
+                issue_key=issue_key,
                 comment=wl.get('comment', {}).get('content') if isinstance(wl.get('comment'), dict) else None
             )
             worklogs.append(worklog)
         
-        # Determine work type
+        return worklogs
+
+    def parse_issue(self, issue_data: Dict, fetch_all_worklogs: bool = True) -> Issue:
+        """Parse raw issue data into Issue model"""
+        fields = issue_data.get('fields', {})
+        
+        components = self._parse_components(fields)
+        worklogs = self._parse_worklogs(issue_data, fetch_all_worklogs)
         work_type = self._categorize_work_type(fields)
         
         return Issue(
@@ -277,29 +285,28 @@ class JiraClient:
             custom_fields={k: v for k, v in fields.items() if k.startswith('customfield_')}
         )
     
+    def _check_field_for_category(self, fields: Dict, field_key: str) -> Optional[WorkType]:
+        """Check a specific field for work category keywords"""
+        field_value = fields.get(field_key)
+        if not field_value:
+            return None
+            
+        category_value = self._extract_field_value(field_value).lower()
+        
+        if 'maintenance' in category_value:
+            return WorkType.MAINTENANCE
+        elif 'development' in category_value:
+            return WorkType.DEVELOPMENT
+        return None
+
     def _categorize_work_type(self, fields: Dict) -> WorkType:
         """Categorize work type based on issue fields"""
         
-        # Check custom field for man hours category
-        manhours_category_field = fields.get('customfield_10082')
-        if manhours_category_field:
-            category_value = self._extract_field_value(manhours_category_field).lower()
-            
-            if 'maintenance' in category_value:
-                return WorkType.MAINTENANCE
-            elif 'development' in category_value:
-                return WorkType.DEVELOPMENT
-        
-        # Check other custom fields
-        for field_key in ['customfield_10048', 'customfield_10081']:
-            field_value = fields.get(field_key)
-            if field_value:
-                category_value = self._extract_field_value(field_value).lower()
-                
-                if 'maintenance' in category_value:
-                    return WorkType.MAINTENANCE
-                elif 'development' in category_value:
-                    return WorkType.DEVELOPMENT
+        # Check custom fields for man hours category
+        for field_key in ['customfield_10082', 'customfield_10048', 'customfield_10081']:
+            work_type = self._check_field_for_category(fields, field_key)
+            if work_type:
+                return work_type
         
         # Fallback to issue type and labels
         issue_type = fields.get('issuetype', {}).get('name', '').lower()
@@ -376,14 +383,3 @@ class JiraClient:
         except JiraClientError as e:
             logger.error(f"Connection test failed: {e}")
             return False
-    
-    def get_all_projects(self) -> List[str]:
-        """Fetch all accessible project keys"""
-        try:
-            response = self._make_request("project")
-            projects = [p['key'] for p in response if 'key' in p]
-            logger.info(f"Found {len(projects)} accessible projects")
-            return projects
-        except JiraClientError as e:
-            logger.error(f"Failed to fetch projects: {e}")
-            return []

@@ -82,16 +82,16 @@ def test_export_yearly_with_total_row(sample_yearly_report, tmp_path):
         lines = f.readlines()
     
     # Check header
-    assert "Project,Component,Jane Smith,John Doe" in lines[0]
+    # Line 0 is "DEVELOPMENT"
+    assert "DEVELOPMENT" in lines[0]
+    # Line 1 is header
+    assert "Project,Component,Jane Smith,John Doe" in lines[1]
     
-    # Check data rows
-    assert "TEST,Backend,15.0,10.0" in lines[1]
-    assert "TEST,Frontend,12.0,8.0" in lines[2]
+    # Check data rows (Development section)
+    assert "TEST,Backend,15.0,10.0" in lines[2]
+    assert "TEST,Frontend,12.0,8.0" in lines[3]
     
-    # Check for empty row
-    assert lines[3].strip() == ""
-    
-    # Check TOTAL row
+    # Check Development TOTAL row
     assert "TOTAL,,27.0,18.0" in lines[4]
     
     print("✅ TOTAL row correctly added to CSV")
@@ -108,7 +108,7 @@ def test_export_yearly_total_calculation(sample_yearly_report, tmp_path):
     with open(result, 'r') as f:
         lines = f.readlines()
     
-    # Parse TOTAL row
+    # Parse TOTAL row (Development total is at index 4)
     total_line = lines[4].strip()
     parts = total_line.split(',')
     

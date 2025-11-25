@@ -7,7 +7,6 @@ import streamlit as st
 import sys
 import logging
 from pathlib import Path
-from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -17,9 +16,13 @@ from src.report_generator import (
     generate_csv_report,
     generate_quarterly_report,
     generate_monthly_breakdown_report,
-    generate_weekly_breakdown_report
+    generate_weekly_breakdown_report,
+    ReportType
 )
-from src.ui import show_config_error, display_report_preview
+from src.ui import show_config_error
+from src.ui.sidebar import render_sidebar
+from src.ui.report_view import display_stored_report
+from src.ui.state_manager import initialize_session_state
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -174,142 +177,8 @@ def handle_cache_clearing(config: Config):
 
 
 # ============================================================================
-# Report Display
-# ============================================================================
-
-def display_download_buttons(csv_path: str, xlsx_path: str, csv_data: bytes, report_type: str):
-    """Display download buttons based on report type"""
-    has_xlsx = report_type in ["Quarterly Breakdown", "Monthly Breakdown", "Weekly Breakdown"]
-    
-    if has_xlsx and xlsx_path and Path(xlsx_path).exists():
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                label=":inbox_tray: Download CSV",
-                data=csv_data,
-                file_name=Path(csv_path).name,
-                mime="text/csv",
-                use_container_width=True,
-                key="download_csv"
-            )
-        with col2:
-            with open(xlsx_path, 'rb') as f:
-                xlsx_data = f.read()
-            st.download_button(
-                label=":inbox_tray: Download XLSX (Formatted)",
-                data=xlsx_data,
-                file_name=Path(xlsx_path).name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                key="download_xlsx"
-            )
-    else:
-        st.download_button(
-            label=":inbox_tray: Download CSV Report",
-            data=csv_data,
-            file_name=Path(csv_path).name,
-            mime="text/csv",
-            use_container_width=True,
-            key="download_csv"
-        )
-
-
-def display_stored_report():
-    """Display report from session state if available"""
-    if not st.session_state.report_generated or not st.session_state.csv_path:
-        return
-    
-    csv_path = st.session_state.csv_path
-    xlsx_path = st.session_state.xlsx_path
-    csv_data = st.session_state.csv_data
-    report_type = st.session_state.report_type
-    
-    # Only display if file exists
-    if not Path(csv_path).exists():
-        return
-    
-    # Show download buttons
-    display_download_buttons(csv_path, xlsx_path, csv_data, report_type)
-    
-    # Display preview based on report type
-    report_type_map = {
-        "Yearly Overview": "yearly",
-        "Quarterly Breakdown": "quarterly",
-        "Monthly Breakdown": "monthly",
-        "Weekly Breakdown": "weekly"
-    }
-    
-    preview_type = report_type_map.get(report_type, "yearly")
-    xlsx_path_obj = Path(xlsx_path) if xlsx_path else None
-    
-    display_report_preview(Path(csv_path), csv_data, preview_type, xlsx_path_obj)
-
-
-# ============================================================================
-# Sidebar Configuration
-# ============================================================================
-
-def render_sidebar():
-    """Render sidebar configuration and return settings"""
-    st.sidebar.header(":gear: Configuration")
-    
-    # Report type selector
-    report_type = st.sidebar.radio(
-        "Report Type",
-        options=["Yearly Overview", "Quarterly Breakdown", "Monthly Breakdown", "Weekly Breakdown"],
-        index=0,
-        help="Choose report type: yearly summary, quarterly breakdown, monthly breakdown, or weekly breakdown per team member"
-    )
-    
-    current_year = datetime.now().year
-    year = st.sidebar.number_input(
-        "Report Year",
-        min_value=2020,
-        max_value=current_year + 1,
-        value=current_year,
-        step=1
-    )
-    
-    with st.sidebar.expander("Advanced Options"):
-        max_workers = st.slider(
-            "Parallel Workers",
-            min_value=1,
-            max_value=16,
-            value=8,
-            help="Number of parallel threads for fetching data"
-        )
-        
-        use_cache = st.checkbox(
-            "Enable Cache",
-            value=True,
-            help="Cache API responses for faster subsequent runs"
-        )
-        
-        clear_cache_clicked = st.button(
-            ":wastebasket: Clear Cache",
-            help="Delete all cached API responses"
-        )
-    
-    return report_type, year, max_workers, use_cache, clear_cache_clicked
-
-
-# ============================================================================
 # Main Application
 # ============================================================================
-
-def initialize_session_state():
-    """Initialize session state variables"""
-    if 'report_generated' not in st.session_state:
-        st.session_state.report_generated = False
-    if 'csv_path' not in st.session_state:
-        st.session_state.csv_path = None
-    if 'xlsx_path' not in st.session_state:
-        st.session_state.xlsx_path = None
-    if 'report_type' not in st.session_state:
-        st.session_state.report_type = None
-    if 'csv_data' not in st.session_state:
-        st.session_state.csv_data = None
-
 
 def main():
     """Main application entry point"""
