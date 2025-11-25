@@ -56,17 +56,21 @@ class WorklogProcessor:
                     
                     # Add or update entry
                     week_num = worklog.week_number
+                    # Split hours equally among components
+                    num_components = len(issue.components)
+                    hours_per_component = worklog.hours / num_components if num_components > 0 else worklog.hours
+                    
                     if key in aggregated:
-                        aggregated[key].add_hours(worklog.hours, issue.key, week_num)
+                        aggregated[key].add_hours(hours_per_component, issue.key, week_num)
                     else:
                         entry = TimeEntry(
                             project_component=project_component,
                             author=worklog.author,
-                            hours=worklog.hours,
+                            hours=hours_per_component,
                             work_type=issue.work_type,
                             issues=[issue.key]
                         )
-                        entry.week_hours[week_num] = worklog.hours
+                        entry.week_hours[week_num] = hours_per_component
                         aggregated[key] = entry
         
         return list(aggregated.values())
