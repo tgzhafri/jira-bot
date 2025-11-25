@@ -54,17 +54,36 @@ def _display_dataframe_with_styling(df: pd.DataFrame, project_col, is_multilevel
     # Build format dict based on column type
     if is_multilevel:
         format_dict = {col: format_number for col in df.columns 
-                      if not str(col[0]).startswith('Project') and not str(col[0]).startswith('Component')}
+                      if not str(col[0]).startswith('Project') and not str(col[1]).startswith('Component')}
     else:
         format_dict = {col: format_number for col in df.columns 
                       if not str(col).startswith('Project') and not str(col).startswith('Component')}
     
+    
+    # Create column config to pin Project and Component columns
+    column_config = {}
+    if is_multilevel:
+        # For MultiIndex columns, use integer indices
+        # Note: Must account for DataFrame index levels even with hide_index=True
+        # Index 0 is the hidden index, so Project=1, Component=2
+        num_index_levels = df.index.nlevels
+        column_config[num_index_levels] = st.column_config.Column(pinned=True)  # Project
+        column_config[num_index_levels + 1] = st.column_config.Column(pinned=True)  # Component
+    else:
+        # Find the actual column names for Project and Component
+        project_cols = [col for col in df.columns if str(col).startswith('Project')]
+        component_cols = [col for col in df.columns if str(col).startswith('Component')]
+        if project_cols:
+            column_config[project_cols[0]] = st.column_config.Column(pinned=True)
+        if component_cols:
+            column_config[component_cols[0]] = st.column_config.Column(pinned=True)
+    
     try:
         styled_df = df.style.apply(highlight_total, axis=1).format(format_dict)
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=250)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=250, column_config=column_config if column_config else None)
     except Exception:
         # Fallback: display without styling
-        st.dataframe(df, use_container_width=True, hide_index=True, height=250)
+        st.dataframe(df, use_container_width=True, hide_index=True, height=250, column_config=column_config if column_config else None)
 
 
 def _parse_xlsx_sheet(ws, is_multilevel: bool = False):
@@ -304,8 +323,20 @@ def display_report_preview(result_path: Path, csv_data: bytes, report_type: str 
                 format_dict = {col: '{:.1f}' for col in dev_display.columns if col not in ['Project', 'Component']}
             
             styled_dev = styled_dev.format(format_dict, na_rep='-')
+            
+            # Create column config to pin Project and Component columns
+            column_config = {}
+            if isinstance(dev_display.columns, pd.MultiIndex):
+                # For MultiIndex columns, use integer indices
+                # Must account for DataFrame index levels even with hide_index=True
+                num_index_levels = dev_display.index.nlevels
+                column_config[num_index_levels] = st.column_config.Column(pinned=True)  # Project
+                column_config[num_index_levels + 1] = st.column_config.Column(pinned=True)  # Component
+            else:
+                column_config['Project'] = st.column_config.Column(pinned=True)
+                column_config['Component'] = st.column_config.Column(pinned=True)
                         
-            st.dataframe(styled_dev, use_container_width=True, hide_index=True, height=300)
+            st.dataframe(styled_dev, use_container_width=True, hide_index=True, height=300, column_config=column_config if column_config else None)
         
         # Display Maintenance table
         if not maint_df.empty:
@@ -328,8 +359,20 @@ def display_report_preview(result_path: Path, csv_data: bytes, report_type: str 
                 format_dict = {col: '{:.1f}' for col in maint_display.columns if col not in ['Project', 'Component']}
             
             styled_maint = styled_maint.format(format_dict, na_rep='-')
+            
+            # Create column config to pin Project and Component columns
+            column_config = {}
+            if isinstance(maint_display.columns, pd.MultiIndex):
+                # For MultiIndex columns, use integer indices
+                # Must account for DataFrame index levels even with hide_index=True
+                num_index_levels = maint_display.index.nlevels
+                column_config[num_index_levels] = st.column_config.Column(pinned=True)  # Project
+                column_config[num_index_levels + 1] = st.column_config.Column(pinned=True)  # Component
+            else:
+                column_config['Project'] = st.column_config.Column(pinned=True)
+                column_config['Component'] = st.column_config.Column(pinned=True)
                         
-            st.dataframe(styled_maint, use_container_width=True, hide_index=True, height=300)
+            st.dataframe(styled_maint, use_container_width=True, hide_index=True, height=300, column_config=column_config if column_config else None)
         
     except Exception as e:
         st.warning(f"Could not display preview: {e}")
