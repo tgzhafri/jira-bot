@@ -436,6 +436,18 @@ class JiraClient:
             
         return issues
 
+    def download_attachment(self, url: str) -> bytes:
+        """Download attachment content from Jira"""
+        try:
+            logger.debug(f"Downloading attachment from {url}")
+            # We use the existing session which already has auth
+            response = self.session.get(url, stream=True)
+            response.raise_for_status()
+            return response.content
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download attachment from {url}: {e}")
+            raise JiraAPIError(f"Attachment download failed: {e}")
+
     def test_connection(self) -> bool:
         """Test connection to Jira"""
         try:

@@ -11,7 +11,7 @@ def initialize_session_state():
     if 'report_type' not in st.session_state or st.session_state.report_type is None:
         st.session_state.report_type = "Yearly Overview"
     if 'current_page' not in st.session_state:
-        st.session_state.current_page = "Settings"
+        st.session_state.current_page = "Dashboard"
     if 'csv_data' not in st.session_state:
         st.session_state.csv_data = None
         
