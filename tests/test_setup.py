@@ -25,7 +25,7 @@ def check_imports():
         return False
     
     try:
-        from src.jira_client import JiraClient
+        from src.services.jira_client import JiraClient
         print("  ✅ JiraClient import OK")
     except ImportError as e:
         print(f"  ❌ JiraClient import failed: {e}")

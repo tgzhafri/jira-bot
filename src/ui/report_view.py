@@ -1,6 +1,6 @@
 import streamlit as st
 from pathlib import Path
-from . import display_report_preview
+from .components import display_report_preview
 
 def display_download_buttons(csv_path: str, xlsx_path: str, csv_data: bytes, report_type: str):
     """Display download buttons based on report type"""

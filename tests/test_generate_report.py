@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config, JiraConfig, ReportConfig
 from src.models import Author, Component, Issue, Worklog, WorkType
-from src.report_generator import generate_csv_report, generate_monthly_breakdown_report
+from src.services.worklog_service import generate_csv_report, generate_monthly_breakdown_report
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def mock_issues(mock_author):
 class TestGenerateCSVReport:
     """Test suite for generate_csv_report function"""
     
-    @patch('src.report_generator.JiraClient')
+    @patch('src.services.worklog_service.JiraClient')
     def test_generate_report_without_filter(self, mock_jira_client_class, mock_config, mock_issues, tmp_path):
         """Test generating standard team overview report"""
         # Setup mock
@@ -92,7 +92,7 @@ class TestGenerateCSVReport:
         assert mock_client.test_connection.called
         assert result is not None or result is None  # May be None if no data
     
-    @patch('src.report_generator.JiraClient')
+    @patch('src.services.worklog_service.JiraClient')
     def test_generate_report_with_filter_author(self, mock_jira_client_class, mock_config, mock_author, mock_issues, tmp_path):
         """Test generating monthly breakdown report for specific user"""
         # Setup mock
@@ -118,7 +118,7 @@ class TestGenerateCSVReport:
         assert mock_client.test_connection.called
         assert result is not None or result is None
     
-    @patch('src.report_generator.JiraClient')
+    @patch('src.services.worklog_service.JiraClient')
     def test_generate_report_with_monthly_breakdown_flag(self, mock_jira_client_class, mock_config, mock_author, tmp_path):
         """Test that monthly_breakdown parameter is accepted"""
         # Setup mock
@@ -144,7 +144,7 @@ class TestGenerateCSVReport:
                 pytest.fail(f"Function signature error: {e}")
             raise
     
-    @patch('src.report_generator.JiraClient')
+    @patch('src.services.worklog_service.JiraClient')
     def test_generate_report_connection_failure(self, mock_jira_client_class, mock_config):
         """Test handling of connection failure"""
         # Setup mock to fail connection

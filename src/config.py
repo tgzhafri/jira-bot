@@ -38,12 +38,6 @@ class JiraConfig:
         api_token = os.getenv('JIRA_API_TOKEN')
         project_keys_str = os.getenv('JIRA_PROJECT_KEY', '')
         
-        if not all([url, username, api_token]):
-            raise ValueError(
-                "Missing required environment variables. "
-                "Please set JIRA_URL, JIRA_USERNAME, and JIRA_API_TOKEN"
-            )
-        
         # If JIRA_PROJECT_KEY is empty or not set, project_keys will be None (fetch all)
         project_keys = None
         if project_keys_str:
@@ -57,13 +51,26 @@ class JiraConfig:
         max_workers = int(os.getenv('JIRA_MAX_WORKERS', '8'))
         
         return cls(
-            url=url.rstrip('/'),
-            username=username,
-            api_token=api_token,
+            url=(url or "").rstrip('/'),
+            username=username or "",
+            api_token=api_token or "",
             project_keys=project_keys,
             enable_cache=enable_cache,
             cache_dir=cache_dir,
             max_workers=max_workers
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "JiraConfig":
+        """Load configuration from a dictionary"""
+        return cls(
+            url=data.get('url', '').rstrip('/'),
+            username=data.get('username', ''),
+            api_token=data.get('api_token', ''),
+            project_keys=data.get('project_keys'),
+            enable_cache=data.get('enable_cache', True),
+            cache_dir=data.get('cache_dir', '.cache'),
+            max_workers=data.get('max_workers', 8)
         )
     
     def validate(self) -> bool:

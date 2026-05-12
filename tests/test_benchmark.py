@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config
-from src.report_generator import generate_csv_report
+from src.services.worklog_service import generate_csv_report
 
 
 def benchmark():

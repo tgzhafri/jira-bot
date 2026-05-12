@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import Config
-from src.jira_client import JiraClient
+from src.services.jira_client import JiraClient
 
 def test_cache():
     """Test that cache directory is created and used"""

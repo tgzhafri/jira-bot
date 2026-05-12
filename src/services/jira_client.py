@@ -11,9 +11,9 @@ import json
 import hashlib
 from pathlib import Path
 
-from .config import JiraConfig
-from .models import Issue, Worklog, Component, Author, WorkType
-from .utils.date_utils import MALAYSIA_TZ
+from ..config import JiraConfig
+from ..models import Issue, Worklog, Component, Author, WorkType
+from ..utils.date_utils import MALAYSIA_TZ
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +374,68 @@ class JiraClient:
             logger.error(f"Failed to fetch projects: {e}")
             return []
     
+    def get_project(self, project_key: str) -> Dict:
+        """Fetch project details"""
+        try:
+            return self._make_request(f"project/{project_key}")
+        except JiraClientError as e:
+            logger.error(f"Failed to fetch project {project_key}: {e}")
+            return {}
+
+    def get_issue_comments(self, issue_key: str) -> List[Dict]:
+        """Fetch all comments for a specific issue"""
+        try:
+            comments = []
+            start_at = 0
+            max_results = 100
+            
+            while True:
+                response = self._make_request(
+                    f"issue/{issue_key}/comment",
+                    params={'startAt': start_at, 'maxResults': max_results}
+                )
+                
+                batch = response.get('comments', [])
+                comments.extend(batch)
+                
+                total = response.get('total', 0)
+                if start_at + len(batch) >= total:
+                    break
+                start_at += len(batch)
+            
+            return comments
+        except JiraClientError as e:
+            logger.warning(f"Failed to fetch comments for {issue_key}: {e}")
+            return []
+
+    def get_issues_by_project(self, project_key: str) -> List[Dict]:
+        """Fetch all issues for a project with full fields"""
+        jql = f'project = "{project_key}"'
+        params = {
+            'jql': jql,
+            'fields': '*all',
+            'maxResults': 100
+        }
+        
+        issues = []
+        start_at = 0
+        
+        logger.info(f"Fetching all issues for project {project_key}")
+        
+        while True:
+            params['startAt'] = start_at
+            response = self._make_request("search/jql", params)
+            
+            batch = response.get('issues', [])
+            issues.extend(batch)
+            
+            total = response.get('total', 0)
+            if start_at + len(batch) >= total:
+                break
+            start_at += len(batch)
+            
+        return issues
+
     def test_connection(self) -> bool:
         """Test connection to Jira"""
         try:
@@ -383,3 +445,4 @@ class JiraClient:
         except JiraClientError as e:
             logger.error(f"Connection test failed: {e}")
             return False
+

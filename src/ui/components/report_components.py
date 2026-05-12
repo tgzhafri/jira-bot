@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from calendar import month_name
 
-from .formatters import parse_split_csv, calculate_summary_stats, transform_to_multiindex
+from ..formatters import parse_split_csv, calculate_summary_stats, transform_to_multiindex
 
 logger = logging.getLogger(__name__)
 

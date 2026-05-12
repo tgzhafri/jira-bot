@@ -19,7 +19,7 @@ def test_imports():
             Issue, Worklog, Author, Component, WorkType,
             ProjectComponent, TimeEntry, MonthlyReport, YearlyReport
         )
-        from src.jira_client import JiraClient, JiraClientError
+        from src.services.jira_client import JiraClient, JiraClientError
         from src.processors import WorklogProcessor
         from src.exporters import CSVExporter, BaseExporter
         from src.utils import get_month_range, format_date_for_jql, setup_logging
@@ -245,7 +245,7 @@ def test_csv_exporter():
 def test_jira_client_parsing():
     """Test Jira client parsing logic"""
     print("\nTesting Jira client parsing...")
-    from src.jira_client import JiraClient
+    from src.services.jira_client import JiraClient
     from src.config import JiraConfig
     
     try:
