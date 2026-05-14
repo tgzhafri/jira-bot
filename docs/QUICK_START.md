@@ -9,9 +9,9 @@
 ### Step 1: Configure
 Create `.env` file in project root:
 ```bash
-JIRA_URL=https://your-company.atlassian.net
-JIRA_USERNAME=your-email@company.com
-JIRA_API_TOKEN=your-api-token
+ATLASSIAN_URL=https://your-company.atlassian.net
+ATLASSIAN_USERNAME=your-email@company.com
+ATLASSIAN_API_TOKEN=your-api-token
 ```
 
 Get API token: https://id.atlassian.com/manage-profile/security/api-tokens

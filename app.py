@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.ui.state_manager import initialize_session_state
-from src.ui.pages import dashboard_page, worklog_page, backup_page, settings_page
+from src.ui.pages import dashboard_page, worklog_page, backup_page, settings_page, confluence_backup_page
 from src.ui.components.connection_ui import display_connection_status
 from streamlit_option_menu import option_menu
 
@@ -39,15 +39,20 @@ def main():
         st.title("🤖 Atlassian Bot")
         
         # Define options and icons
-        options = ["Dashboard", "Settings", "Manhour Calculator", "Jira Backup"]
-        icons = ["speedometer2", "gear", "clock-history", "archive"]
+        options = ["Dashboard", "Settings", "Manhour Calculator", "Jira Backup", "Confluence Backup"]
+        icons = ["speedometer2", "gear", "clock-history", "archive", "cloud-download"]
+
+        # Determine default index from session state (set by Quick Action buttons)
+        default_idx = 0
+        if "current_page" in st.session_state and st.session_state.current_page in options:
+            default_idx = options.index(st.session_state.current_page)
 
         selected = option_menu(
             menu_title=None,
             options=options,
             icons=icons,
             menu_icon="robot",
-            default_index=0,
+            default_index=default_idx,
             key="nav_menu",
             styles={
                 "container": {"padding": "5!important", "background-color": "transparent"},
@@ -75,12 +80,14 @@ def main():
         worklog_page.show()
     elif selected == "Jira Backup":
         backup_page.show()
+    elif selected == "Confluence Backup":
+        confluence_backup_page.show()
 
     # Global Footer
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.8em;'>
-        Jira Automation Tool | Supports Cloud REST API v3
+        Atlassian Bot | Supports Jira & Confluence Cloud REST API
     </div>
     """, unsafe_allow_html=True)
 

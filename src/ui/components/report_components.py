@@ -19,9 +19,9 @@ def show_config_error(error_msg: str):
     st.markdown("""
     Please set these environment variables:
     ```
-    JIRA_URL=https://your-company.atlassian.net
-    JIRA_USERNAME=your-email@company.com
-    JIRA_API_TOKEN=your-api-token
+    ATLASSIAN_URL=https://your-company.atlassian.net
+    ATLASSIAN_USERNAME=your-email@company.com
+    ATLASSIAN_API_TOKEN=your-api-token
     ```
     
     **For Docker:** Make sure your `.env` file exists and restart:

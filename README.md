@@ -54,9 +54,9 @@ pip install -e .
 Create `.env` file:
 
 ```bash
-JIRA_URL=https://your-company.atlassian.net
-JIRA_USERNAME=your-email@company.com
-JIRA_API_TOKEN=your-api-token
+ATLASSIAN_URL=https://your-company.atlassian.net
+ATLASSIAN_USERNAME=your-email@company.com
+ATLASSIAN_API_TOKEN=your-api-token
 # JIRA_PROJECT_KEY=PROJ1,PROJ2  # Optional: leave empty to fetch all projects
 ```
 
@@ -201,9 +201,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 | Variable | Description | Example | Required |
 |----------|-------------|---------|----------|
-| `JIRA_URL` | Your Jira instance URL | `https://company.atlassian.net` | Yes |
-| `JIRA_USERNAME` | Your email (for Basic Auth) | `user@company.com` | Yes* |
-| `JIRA_API_TOKEN` | API token | `abc123...` | Yes |
+| `ATLASSIAN_URL` | Your Atlassian instance URL | `https://company.atlassian.net` | Yes |
+| `ATLASSIAN_USERNAME` | Your email (for Basic Auth) | `user@company.com` | Yes* |
+| `ATLASSIAN_API_TOKEN` | API token | `abc123...` | Yes |
 | `JIRA_PROJECT_KEY` | Project keys (comma-separated) | `PROJ1,PROJ2` | No (fetches all if empty) |
 | `JIRA_ENABLE_CACHE` | Enable response caching | `true` | No (default: true) |
 | `JIRA_CACHE_DIR` | Cache directory | `.cache` | No (default: .cache) |

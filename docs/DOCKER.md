@@ -66,9 +66,9 @@ make help           # Show all commands
 Create a `.env` file:
 
 ```bash
-JIRA_URL=https://your-company.atlassian.net
-JIRA_USERNAME=your-email@company.com
-JIRA_API_TOKEN=your-api-token
+ATLASSIAN_URL=https://your-company.atlassian.net
+ATLASSIAN_USERNAME=your-email@company.com
+ATLASSIAN_API_TOKEN=your-api-token
 JIRA_PROJECT_KEY=PROJ1,PROJ2  # Optional: leave empty for all projects
 JIRA_ENABLE_CACHE=true
 JIRA_MAX_WORKERS=8
