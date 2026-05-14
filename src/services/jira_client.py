@@ -153,6 +153,54 @@ class JiraClient:
             logger.warning(f"Failed to fetch user details for {account_id}: {e}")
             return {}
     
+    def _search_issues_jql(
+        self,
+        jql: str,
+        fields: str = "*all",
+        expand: Optional[str] = None,
+        max_results: int = 1000
+    ) -> List[Dict]:
+        """Paginated JQL search using nextPageToken (Jira Cloud recommended).
+
+        Args:
+            jql: JQL query string.
+            fields: Comma-separated field list or '*all'.
+            expand: Optional expand parameter (e.g. 'worklog').
+            max_results: Page size per request.
+
+        Returns:
+            Aggregated list of raw issue dicts.
+        """
+        params: Dict[str, Any] = {
+            'jql': jql,
+            'fields': fields,
+            'maxResults': max_results,
+        }
+        if expand:
+            params['expand'] = expand
+
+        issues: List[Dict] = []
+        next_page_token: Optional[str] = None
+
+        while True:
+            if next_page_token:
+                params['nextPageToken'] = next_page_token
+
+            response = self._make_request("search/jql", params)
+
+            batch = response.get('issues', [])
+            issues.extend(batch)
+
+            if response.get('isLast', True):
+                break
+
+            next_page_token = response.get('nextPageToken')
+            if not next_page_token:
+                logger.warning("isLast=False but no nextPageToken returned")
+                break
+
+        return issues
+
     def get_issues_with_worklog(
         self,
         project_key: str,
@@ -160,47 +208,37 @@ class JiraClient:
         end_date: str,
         filter_user: Optional[str] = None
     ) -> List[Dict]:
-        """Fetch issues with worklog data"""
-        
-        # Build JQL query
+        """Fetch issues with worklog data for a date range.
+
+        Args:
+            project_key: Jira project key.
+            start_date: Start date string for JQL (YYYY-MM-DD).
+            end_date: End date string for JQL (YYYY-MM-DD).
+            filter_user: Optional user email to filter worklogs by author.
+
+        Returns:
+            List of raw issue dicts with worklog data expanded.
+        """
         jql_parts = [
             f'project = {project_key}',
             f'worklogDate >= "{start_date}"',
             f'worklogDate <= "{end_date}"'
         ]
-        
+
         if filter_user:
             jql_parts.append(f'worklogAuthor = "{filter_user}"')
-        
+
         jql = ' AND '.join(jql_parts)
-        
-        params = {
-            'jql': jql,
-            'fields': 'key,summary,components,labels,issuetype,worklog,customfield_*',
-            'expand': 'worklog',
-            'maxResults': 1000  # Increased from 100 to 1000 for better performance
-        }
-        
-        issues = []
-        start_at = 0
-        
+
         logger.info(f"Fetching issues for {project_key} from {start_date} to {end_date}")
-        
-        while True:
-            params['startAt'] = start_at
-            response = self._make_request("search/jql", params)
-            
-            batch = response.get('issues', [])
-            issues.extend(batch)
-            
-            total = response.get('total', 0)
-            logger.debug(f"Fetched {len(issues)}/{total} issues")
-            
-            if start_at + len(batch) >= total:
-                break
-            
-            start_at += len(batch)
-        
+
+        issues = self._search_issues_jql(
+            jql=jql,
+            fields='key,summary,components,labels,issuetype,worklog,customfield_*',
+            expand='worklog',
+            max_results=1000,
+        )
+
         logger.info(f"Fetched {len(issues)} issues for {project_key}")
         return issues
     
@@ -331,31 +369,35 @@ class JiraClient:
             return str(field_value)
     
     def get_all_worklogs_for_issue(self, issue_key: str) -> List[Dict]:
-        """Fetch all worklogs for a specific issue"""
+        """Fetch all worklogs for a specific issue using nextPageToken pagination."""
         try:
             worklogs = []
-            start_at = 0
-            max_results = 1000  # Increased from 100 to 1000
-            
+            next_page_token: Optional[str] = None
+
             while True:
+                params: Dict[str, Any] = {'maxResults': 1000}
+                if next_page_token:
+                    params['startAfter'] = next_page_token
+
                 response = self._make_request(
                     f"issue/{issue_key}/worklog",
-                    params={'startAt': start_at, 'maxResults': max_results}
+                    params=params
                 )
-                
+
                 batch = response.get('worklogs', [])
                 worklogs.extend(batch)
-                
-                total = response.get('total', 0)
-                
-                if start_at + len(batch) >= total:
+
+                if response.get('isLast', True):
                     break
-                
-                start_at += len(batch)
-            
+
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token:
+                    logger.warning(f"isLast=False but no nextPageToken for {issue_key} worklogs")
+                    break
+
             logger.debug(f"Fetched {len(worklogs)} worklogs for {issue_key}")
             return worklogs
-            
+
         except JiraClientError as e:
             logger.warning(f"Failed to fetch worklogs for {issue_key}: {e}")
             return []
@@ -383,57 +425,57 @@ class JiraClient:
             return {}
 
     def get_issue_comments(self, issue_key: str) -> List[Dict]:
-        """Fetch all comments for a specific issue"""
+        """Fetch all comments for a specific issue using nextPageToken pagination."""
         try:
             comments = []
-            start_at = 0
-            max_results = 100
-            
+            next_page_token: Optional[str] = None
+
             while True:
+                params: Dict[str, Any] = {'maxResults': 100}
+                if next_page_token:
+                    params['nextPageToken'] = next_page_token
+
                 response = self._make_request(
                     f"issue/{issue_key}/comment",
-                    params={'startAt': start_at, 'maxResults': max_results}
+                    params=params
                 )
-                
+
                 batch = response.get('comments', [])
                 comments.extend(batch)
-                
-                total = response.get('total', 0)
-                if start_at + len(batch) >= total:
+
+                if response.get('isLast', True):
                     break
-                start_at += len(batch)
-            
+
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token:
+                    logger.warning(f"isLast=False but no nextPageToken for {issue_key} comments")
+                    break
+
             return comments
         except JiraClientError as e:
             logger.warning(f"Failed to fetch comments for {issue_key}: {e}")
             return []
 
     def get_issues_by_project(self, project_key: str) -> List[Dict]:
-        """Fetch all issues for a project with full fields"""
+        """Fetch all issues for a project with full fields.
+
+        Args:
+            project_key: Jira project key.
+
+        Returns:
+            List of raw issue dicts with all fields.
+        """
         jql = f'project = "{project_key}"'
-        params = {
-            'jql': jql,
-            'fields': '*all',
-            'maxResults': 100
-        }
-        
-        issues = []
-        start_at = 0
-        
+
         logger.info(f"Fetching all issues for project {project_key}")
-        
-        while True:
-            params['startAt'] = start_at
-            response = self._make_request("search/jql", params)
-            
-            batch = response.get('issues', [])
-            issues.extend(batch)
-            
-            total = response.get('total', 0)
-            if start_at + len(batch) >= total:
-                break
-            start_at += len(batch)
-            
+
+        issues = self._search_issues_jql(
+            jql=jql,
+            fields='*all',
+            max_results=100,
+        )
+
+        logger.info(f"Fetched all {len(issues)} issues for project {project_key}")
         return issues
 
     def download_attachment(self, url: str) -> bytes:

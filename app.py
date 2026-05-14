@@ -25,7 +25,7 @@ def main():
     
     # Page config
     st.set_page_config(
-        page_title="Jira Bot | Automation Tool",
+        page_title="Atlassian Bot | Automation Tool",
         page_icon="🤖",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -36,32 +36,19 @@ def main():
     
     # Sidebar Navigation
     with st.sidebar:
-        st.title("🤖 Jira Bot")
-        
-        # Navigation Options mapping
-        pages_map = {
-            "Dashboard": "Dashboard",
-            "Settings": "Settings",
-            "Manhour Calculator": "Manhour Calculator",
-            "Jira Backup": "Jira Backup"
-        }
+        st.title("🤖 Atlassian Bot")
         
         # Define options and icons
         options = ["Dashboard", "Settings", "Manhour Calculator", "Jira Backup"]
         icons = ["speedometer2", "gear", "clock-history", "archive"]
-        
-        # Current index for highlighting
-        try:
-            default_index = options.index(st.session_state.get('current_page', "Dashboard"))
-        except ValueError:
-            default_index = 0
 
         selected = option_menu(
-            menu_title=None, # Use the title above
+            menu_title=None,
             options=options,
             icons=icons,
             menu_icon="robot",
-            default_index=default_index,
+            default_index=0,
+            key="nav_menu",
             styles={
                 "container": {"padding": "5!important", "background-color": "transparent"},
                 "icon": {"color": "#0052cc", "font-size": "1.2rem"}, 
