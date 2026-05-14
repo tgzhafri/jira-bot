@@ -51,8 +51,8 @@ def main():
             key="nav_menu",
             styles={
                 "container": {"padding": "5!important", "background-color": "transparent"},
-                "icon": {"color": "#0052cc", "font-size": "1.2rem"}, 
-                "nav-link": {"font-size": "1rem", "text-align": "left", "margin": "0px", "--hover-color": "#f4f5f7"},
+                "icon": {"font-size": "1.2rem"},
+                "nav-link": {"font-size": "1rem", "text-align": "left", "margin": "0px", "--hover-color": "#f4f5f7", "color": "#0052cc"},
                 "nav-link-selected": {"background-color": "#0052cc", "color": "white"},
             }
         )

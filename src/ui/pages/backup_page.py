@@ -78,8 +78,8 @@ def show():
             warning_placeholder = st.empty()
             warning_placeholder.warning("⚠️ **DO NOT refresh or navigate away** while backup is in progress. This process runs in the background but requires the page to stay active to complete the download preparation.")
             
-            status_container = st.empty()
             progress_bar = st.progress(0)
+            status_text = st.empty()
             
             # Decide which project(s) to backup
             if selected_project == "ALL PROJECTS":
@@ -89,56 +89,58 @@ def show():
                 target_projects = selected_project
                 display_name = selected_project
 
-            # Using st.status for better UI
-            with st.status(f"Initializing backup for {display_name}...", expanded=True) as status:
-                def update_progress(progress, text):
-                    progress_bar.progress(progress)
-                    status.update(label=f"Processing: {text}", state="running")
-                    
-                try:
-                    # Run the backup
-                    temp_zip_path = backup_service.export_project(
-                        target_projects,
-                        include_comments=include_comments,
-                        include_worklogs=include_worklogs,
-                        include_attachments=include_attachments,
-                        progress_callback=update_progress
-                    )
-                    
-                    status.update(label="✅ Backup complete! Preparing download...", state="complete")
-                    progress_bar.progress(1.0)
-                    
-                    # Read the file for download
-                    with open(temp_zip_path, "rb") as f:
-                        file_data = f.read()
-                    
-                    # Clean up temp file
-                    os.remove(temp_zip_path)
-                    
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"jira_backup_{display_name}_{timestamp}.zip"
-                    
-                    status_container.success(f"✅ Backup for **{display_name}** is ready!")
-                    
-                    st.download_button(
-                        label=f"📥 Download ZIP Backup",
-                        data=file_data,
-                        file_name=filename,
-                        mime="application/zip",
-                        use_container_width=True,
-                        type="primary"
-                    )
-                    
-                    # Remove the warning after success
-                    warning_placeholder.empty()
-                    
-                except Exception as e:
-                    status.update(label="❌ Backup failed", state="error")
-                    status_container.error(f"❌ Backup failed: {str(e)}")
-                    logger.exception("Backup failed")
-                finally:
-                    # Progress bar stays
-                    pass
+            def update_progress(progress, text):
+                progress_bar.progress(progress)
+                status_text.info(f"⏳ Processing: {text}")
+                
+            try:
+                # Run the backup
+                temp_zip_path = backup_service.export_project(
+                    target_projects,
+                    include_comments=include_comments,
+                    include_worklogs=include_worklogs,
+                    include_attachments=include_attachments,
+                    progress_callback=update_progress
+                )
+                
+                progress_bar.progress(1.0)
+                status_text.empty()
+                
+                # Read the file for download
+                with open(temp_zip_path, "rb") as f:
+                    file_data = f.read()
+                
+                # Clean up temp file
+                os.remove(temp_zip_path)
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"jira_backup_{display_name}_{timestamp}.zip"
+                file_size_mb = len(file_data) / (1024 * 1024)
+                
+                # Remove the warning after success
+                warning_placeholder.empty()
+                
+                # Show download card
+                with st.container(border=True):
+                    st.success(f"✅ Backup complete for **{display_name}**!")
+                    col_info, col_download = st.columns([2, 1])
+                    with col_info:
+                        st.markdown(f"📁 **{filename}**")
+                        st.caption(f"Size: {file_size_mb:.1f} MB")
+                    with col_download:
+                        st.download_button(
+                            label="📥 Download ZIP",
+                            data=file_data,
+                            file_name=filename,
+                            mime="application/zip",
+                            use_container_width=True,
+                            type="primary"
+                        )
+                
+            except Exception as e:
+                status_text.empty()
+                st.error(f"❌ Backup failed: {str(e)}")
+                logger.exception("Backup failed")
 
     st.markdown("---")
     
