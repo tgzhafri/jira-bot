@@ -286,7 +286,7 @@ def _render_job_history(service: ConfluenceBackupService) -> None:
             return
 
         if not jobs:
-            st.info("No backup or restore jobs found.")
+            st.info("No backup jobs found.")
             return
 
         # Build table data

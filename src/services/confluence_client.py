@@ -1,5 +1,5 @@
 """
-Confluence Data Center API client for backup and restore operations
+Confluence Data Center API client for backup operations
 """
 
 import logging
@@ -39,7 +39,7 @@ class ConfluenceConnectionError(ConfluenceClientError):
 
 
 class ConfluenceClient:
-    """Client for interacting with Confluence Data Center Backup and Restore API"""
+    """Client for interacting with Confluence Data Center Backup API"""
 
     BASE_PATH = "/rest/api/backup-restore/"
     TIMEOUT = 30  # seconds

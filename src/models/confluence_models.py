@@ -1,5 +1,5 @@
 """
-Data models for Confluence Data Center backup and restore operations.
+Data models for Confluence Data Center backup operations.
 
 Defines enums for job state, operation, and scope; dataclasses for job details
 and statistics; and a parsing function for converting API JSON responses into
@@ -13,7 +13,7 @@ from typing import List, Optional
 
 
 class ConfluenceJobState(Enum):
-    """Job lifecycle states for Confluence backup/restore operations."""
+    """Job lifecycle states for Confluence backup operations."""
 
     QUEUED = "QUEUED"
     IN_PROGRESS = "IN_PROGRESS"
@@ -23,14 +23,13 @@ class ConfluenceJobState(Enum):
 
 
 class ConfluenceJobOperation(Enum):
-    """Types of Confluence backup/restore operations."""
+    """Types of Confluence backup operations."""
 
     BACKUP = "BACKUP"
-    RESTORE = "RESTORE"
 
 
 class ConfluenceJobScope(Enum):
-    """Scope of a Confluence backup/restore job."""
+    """Scope of a Confluence backup job."""
 
     SITE = "SITE"
     SPACE = "SPACE"
@@ -38,7 +37,7 @@ class ConfluenceJobScope(Enum):
 
 @dataclass
 class ConfluenceStatistics:
-    """Progress statistics for a Confluence backup/restore job.
+    """Progress statistics for a Confluence backup job.
 
     All count fields must be non-negative integers.
     """
@@ -63,10 +62,10 @@ class ConfluenceStatistics:
 
 @dataclass
 class ConfluenceJobDetails:
-    """Full details of a Confluence backup/restore job.
+    """Full details of a Confluence backup job.
 
     Represents the structured response from the Confluence Data Center
-    Backup and Restore REST API.
+    Backup REST API.
     """
 
     id: str

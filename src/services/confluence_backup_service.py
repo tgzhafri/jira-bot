@@ -1,8 +1,8 @@
 """
-Confluence Data Center backup and restore service.
+Confluence Data Center backup service.
 
-Orchestrates backup/restore operations by creating jobs, polling their status,
-managing file downloads, and handling restore uploads via the ConfluenceClient.
+Orchestrates backup operations by creating jobs, polling their status,
+and managing file downloads via the ConfluenceClient.
 """
 
 import logging
@@ -10,8 +10,6 @@ import re
 import time
 from pathlib import Path
 from typing import Callable, List, Optional
-
-import requests
 
 from ..models.confluence_models import (
     ConfluenceJobDetails,
@@ -22,28 +20,25 @@ from ..models.confluence_models import (
 )
 from .confluence_client import (
     ConfluenceAPIError,
-    ConfluenceAuthenticationError,
     ConfluenceClient,
     ConfluenceClientError,
     ConfluenceConnectionError,
-    ConfluencePermissionError,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class ConfluenceBackupService:
-    """Service for orchestrating Confluence Data Center backup and restore operations.
+    """Service for orchestrating Confluence Data Center backup operations.
 
     Provides methods for creating site/space backups, polling job status,
-    downloading backup files, and restoring from backups.
+    and downloading backup files.
     """
 
     DEFAULT_POLL_INTERVAL = 5  # seconds
     MAX_POLL_DURATION = 14400  # 4 hours in seconds
     MAX_POLL_RETRIES = 3
     DOWNLOAD_CHUNK_SIZE = 8192  # bytes
-    MAX_UPLOAD_SIZE = 10 * 1024**3  # 10 GB
 
     # Validation pattern for space backup file_name_prefix: alphanumeric, hyphen, underscore only
     _SPACE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -55,75 +50,6 @@ class ConfluenceBackupService:
             client: An authenticated ConfluenceClient instance.
         """
         self.client = client
-
-    def _upload_file(self, endpoint: str, file_path: Path, skip_reindex: bool) -> ConfluenceJobDetails:
-        """Upload a local backup file to the given restore endpoint.
-
-        Shared implementation for restore_site_upload and restore_space_upload.
-
-        Args:
-            endpoint: The API endpoint path (e.g., "restore/site/upload").
-            file_path: Path to the local backup file.
-            skip_reindex: If True, skip reindexing after restore.
-
-        Returns:
-            ConfluenceJobDetails with the restore job ID and initial state.
-
-        Raises:
-            ValueError: If the file exceeds 10 GB.
-            FileNotFoundError: If the file does not exist.
-            ConfluenceClientError: If the API request fails.
-        """
-        if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
-
-        file_size = file_path.stat().st_size
-        if file_size > self.MAX_UPLOAD_SIZE:
-            raise ValueError(
-                f"File size ({file_size} bytes) exceeds maximum allowed size "
-                f"of 10 GB ({self.MAX_UPLOAD_SIZE} bytes)"
-            )
-
-        url = self.client._build_url(endpoint)
-
-        logger.info(
-            f"Uploading restore file '{file_path}' ({file_size} bytes, "
-            f"skip_reindex={skip_reindex}) to {endpoint}"
-        )
-
-        try:
-            with open(file_path, "rb") as f:
-                files = {"file": (file_path.name, f)}
-                data = {"skipReindex": str(skip_reindex).lower()}
-                response = self.client.session.post(
-                    url,
-                    files=files,
-                    data=data,
-                    timeout=self.client.TIMEOUT,
-                )
-                response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            status_code = e.response.status_code
-            if status_code == 401:
-                raise ConfluenceAuthenticationError(
-                    "Authentication failed. Check your credentials."
-                )
-            elif status_code == 403:
-                raise ConfluencePermissionError(
-                    "Permission denied. The authenticated user lacks permission "
-                    "for the requested operation."
-                )
-            else:
-                body = e.response.text[:1000]
-                raise ConfluenceAPIError(
-                    f"API request failed with status {status_code}: {body}"
-                )
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-            raise ConfluenceConnectionError(f"Network error: {e}")
-        except requests.exceptions.RequestException as e:
-            raise ConfluenceConnectionError(f"Request failed: {e}")
-
-        return parse_job_details(response.json())
 
     def create_site_backup(
         self,
@@ -292,7 +218,7 @@ class ConfluenceBackupService:
             raise
 
     def cancel_job(self, job_id: str) -> bool:
-        """Cancel a running or queued backup/restore job.
+        """Cancel a running or queued backup job.
 
         Sends a PUT request to /jobs/{jobId}/cancel.
 
@@ -311,7 +237,7 @@ class ConfluenceBackupService:
         return True
 
     def clear_queue(self) -> bool:
-        """Cancel all queued backup/restore jobs.
+        """Cancel all queued backup jobs.
 
         Sends a PUT request to /jobs/clear-queue.
 
@@ -336,7 +262,7 @@ class ConfluenceBackupService:
         job_scope: Optional[str] = None,
         limit: int = 50,
     ) -> List[ConfluenceJobDetails]:
-        """List backup/restore jobs with optional filters.
+        """List backup jobs with optional filters.
 
         Sends a GET request to /jobs with the specified filter parameters.
 
@@ -346,7 +272,7 @@ class ConfluenceBackupService:
             from_date: Filter jobs created on or after this date (YYYY-MM-DD).
             to_date: Filter jobs created on or before this date (YYYY-MM-DD).
             job_states: Filter by one or more job states (e.g., ["COMPLETED", "FAILED"]).
-            job_operation: Filter by operation type ("BACKUP" or "RESTORE").
+            job_operation: Filter by operation type ("BACKUP").
             job_scope: Filter by scope ("SITE" or "SPACE").
             limit: Maximum number of results to return (1–100, default 50).
 
@@ -431,7 +357,7 @@ class ConfluenceBackupService:
             return [parse_job_details(item) for item in data]
 
     def get_job_status(self, job_id: str) -> ConfluenceJobDetails:
-        """Get the current status of a backup/restore job.
+        """Get the current status of a backup job.
 
         Sends a GET request to /jobs/{jobId} and returns the parsed Job_Details.
 
@@ -540,160 +466,3 @@ class ConfluenceBackupService:
 
             # Wait before next poll
             time.sleep(poll_interval)
-
-    def _validate_filename(self, filename: str) -> None:
-        """Validate that a filename is between 1 and 255 characters.
-
-        Args:
-            filename: The filename to validate.
-
-        Raises:
-            ValueError: If filename is empty or exceeds 255 characters.
-        """
-        if not filename or len(filename) > 255:
-            raise ValueError(
-                "filename must be between 1 and 255 characters, "
-                f"got {len(filename) if filename else 0}"
-            )
-
-    def restore_site(
-        self, filename: str, skip_reindex: bool = False
-    ) -> ConfluenceJobDetails:
-        """Restore a Confluence site from a server-side backup file.
-
-        Sends a POST request to /restore/site with the specified filename
-        and skipReindex parameter.
-
-        Args:
-            filename: Name of the backup file on the server (1–255 characters).
-            skip_reindex: If True, skip reindexing after restore.
-
-        Returns:
-            ConfluenceJobDetails with the restore job ID and initial state.
-
-        Raises:
-            ValueError: If filename is empty or exceeds 255 characters.
-            ConfluenceClientError: If the API request fails.
-        """
-        self._validate_filename(filename)
-
-        payload = {
-            "filename": filename,
-            "skipReindex": skip_reindex,
-        }
-
-        logger.info(
-            f"Restoring site from file '{filename}' "
-            f"(skip_reindex={skip_reindex})"
-        )
-
-        response = self.client._make_request(
-            "POST", "restore/site", json_data=payload
-        )
-        return parse_job_details(response.json())
-
-    def restore_site_upload(
-        self, file_path: Path, skip_reindex: bool = False
-    ) -> ConfluenceJobDetails:
-        """Restore a Confluence site by uploading a local backup file.
-
-        Sends a multipart POST request to /restore/site/upload with the file
-        content. Validates that the file does not exceed 10 GB before uploading.
-
-        Args:
-            file_path: Path to the local backup file to upload.
-            skip_reindex: If True, skip reindexing after restore.
-
-        Returns:
-            ConfluenceJobDetails with the restore job ID and initial state.
-
-        Raises:
-            ValueError: If the file exceeds 10 GB.
-            FileNotFoundError: If the file does not exist.
-            ConfluenceClientError: If the API request fails.
-        """
-        return self._upload_file("restore/site/upload", file_path, skip_reindex)
-
-    def restore_space(
-        self, filename: str, skip_reindex: bool = False
-    ) -> ConfluenceJobDetails:
-        """Restore Confluence spaces from a server-side backup file.
-
-        Sends a POST request to /restore/space with the specified filename
-        and skipReindex parameter.
-
-        Args:
-            filename: Name of the backup file on the server (1–255 characters).
-            skip_reindex: If True, skip reindexing after restore.
-
-        Returns:
-            ConfluenceJobDetails with the restore job ID and initial state.
-
-        Raises:
-            ValueError: If filename is empty or exceeds 255 characters.
-            ConfluenceClientError: If the API request fails.
-        """
-        self._validate_filename(filename)
-
-        payload = {
-            "filename": filename,
-            "skipReindex": skip_reindex,
-        }
-
-        logger.info(
-            f"Restoring space from file '{filename}' "
-            f"(skip_reindex={skip_reindex})"
-        )
-
-        response = self.client._make_request(
-            "POST", "restore/space", json_data=payload
-        )
-        return parse_job_details(response.json())
-
-    def restore_space_upload(
-        self, file_path: Path, skip_reindex: bool = False
-    ) -> ConfluenceJobDetails:
-        """Restore Confluence spaces by uploading a local backup file.
-
-        Sends a multipart POST request to /restore/space/upload with the file
-        content. Validates that the file does not exceed 10 GB before uploading.
-
-        Args:
-            file_path: Path to the local backup file to upload.
-            skip_reindex: If True, skip reindexing after restore.
-
-        Returns:
-            ConfluenceJobDetails with the restore job ID and initial state.
-
-        Raises:
-            ValueError: If the file exceeds 10 GB.
-            FileNotFoundError: If the file does not exist.
-            ConfluenceClientError: If the API request fails.
-        """
-        return self._upload_file("restore/space/upload", file_path, skip_reindex)
-
-    def list_restore_files(self, job_scope: Optional[str] = None) -> List[str]:
-        """List backup files available on the server for restore.
-
-        Sends a GET request to /restore/files with an optional jobScope filter.
-
-        Args:
-            job_scope: Optional filter to restrict results by scope
-                (e.g., "SITE" or "SPACE").
-
-        Returns:
-            List of available filenames as strings.
-
-        Raises:
-            ConfluenceClientError: If the API request fails.
-        """
-        params = {}
-        if job_scope is not None:
-            params["jobScope"] = job_scope
-
-        logger.info(f"Listing restore files (job_scope={job_scope!r})")
-
-        response = self.client._make_request(
-            "GET", "restore/files", params=params if params else None
-        )
-        return response.json()
