@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch, MagicMock
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import Config, JiraConfig, ReportConfig
+from src.config import Config, AtlassianConfig, ReportConfig
 from src.models import Author, Component, Issue, Worklog, WorkType
 from src.services.worklog_service import generate_csv_report, generate_monthly_breakdown_report
 
@@ -20,7 +20,7 @@ from src.services.worklog_service import generate_csv_report, generate_monthly_b
 @pytest.fixture
 def mock_config():
     """Create a mock configuration"""
-    jira_config = JiraConfig(
+    atlassian_config = AtlassianConfig(
         url="https://test.atlassian.net",
         username="test@example.com",
         api_token="test-token",
@@ -29,7 +29,7 @@ def mock_config():
         max_workers=2
     )
     report_config = ReportConfig(year=2025)
-    return Config(jira=jira_config, report=report_config)
+    return Config(atlassian=atlassian_config, report=report_config)
 
 
 @pytest.fixture

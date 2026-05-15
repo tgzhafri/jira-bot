@@ -101,11 +101,6 @@ class AtlassianConfig:
         return True
 
 
-# Backward-compatible aliases
-JiraConfig = AtlassianConfig
-ConfluenceConfig = AtlassianConfig
-
-
 @dataclass
 class ReportConfig:
     """Report generation configuration"""
@@ -151,14 +146,11 @@ class Config:
 
     def __init__(
         self,
-        jira: Optional[AtlassianConfig] = None,
         atlassian: Optional[AtlassianConfig] = None,
         report: Optional[ReportConfig] = None,
         export: Optional[ExportConfig] = None,
     ):
-        self.jira = jira or AtlassianConfig.from_env()
-        # Shared Atlassian credentials — same instance as jira config
-        self.atlassian = atlassian or self.jira
+        self.atlassian = atlassian or AtlassianConfig.from_env()
         self.report = report or ReportConfig.default()
         self.export = export or ExportConfig()
 
@@ -166,11 +158,11 @@ class Config:
     def from_env(cls) -> "Config":
         """Load all configuration from environment"""
         return cls(
-            jira=AtlassianConfig.from_env(),
+            atlassian=AtlassianConfig.from_env(),
             report=ReportConfig.default(),
             export=ExportConfig(),
         )
 
     def validate(self) -> bool:
         """Validate all configuration"""
-        return self.jira.validate()
+        return self.atlassian.validate()

@@ -12,7 +12,7 @@ def check_imports():
     print("Checking imports...")
 
     try:
-        from src.config import Config, JiraConfig, ReportConfig
+        from src.config import Config, AtlassianConfig, ReportConfig
         print("  ✅ Config imports OK")
     except ImportError as e:
         print(f"  ❌ Config import failed: {e}")
@@ -107,8 +107,8 @@ def check_config():
             from src.config import Config
             config = Config.from_env()
             print("  ✅ Configuration loads successfully")
-            print(f"     - Jira URL: {config.jira.url}")
-            print(f"     - Projects: {', '.join(config.jira.project_keys)}")
+            print(f"     - Atlassian URL: {config.atlassian.url}")
+            print(f"     - Projects: {', '.join(config.atlassian.project_keys)}")
             return True
         except ValueError as e:
             print(f"  ⚠️  Configuration error: {e}")

@@ -11,16 +11,16 @@ def _get_project_count(config) -> int:
     # Return cached value if the connection URL hasn't changed
     if (
         cache_key in st.session_state
-        and st.session_state.get(cache_url_key) == config.jira.url
+        and st.session_state.get(cache_url_key) == config.atlassian.url
     ):
         return st.session_state[cache_key]
 
-    client = JiraClient(config.jira)
+    client = JiraClient(config.atlassian)
     projects = client.get_all_projects()
     count = len(projects) if projects else 0
 
     st.session_state[cache_key] = count
-    st.session_state[cache_url_key] = config.jira.url
+    st.session_state[cache_url_key] = config.atlassian.url
     return count
 
 
@@ -37,7 +37,7 @@ def show():
         return
 
     # Connection Status Banner
-    st.success(f"✅ Connected to **{config.jira.url}** as **{config.jira.username}**")
+    st.success(f"✅ Connected to **{config.atlassian.url}** as **{config.atlassian.username}**")
 
     # Quick Metrics
     col1, col2, col3, col4 = st.columns(4)

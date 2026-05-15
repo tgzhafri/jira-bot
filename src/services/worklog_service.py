@@ -165,9 +165,9 @@ def _fetch_data_parallel(
 def _initialize_client_and_processor(config: Config):
     """Initialize Jira client and worklog processor"""
     client = JiraClient(
-        config.jira,
-        enable_cache=config.jira.enable_cache,
-        cache_dir=config.jira.cache_dir
+        config.atlassian,
+        enable_cache=config.atlassian.enable_cache,
+        cache_dir=config.atlassian.cache_dir
     )
     processor = WorklogProcessor(config.report)
     
@@ -181,14 +181,14 @@ def _initialize_client_and_processor(config: Config):
 
 def _get_project_keys(config: Config, client: JiraClient) -> Optional[List[str]]:
     """Get project keys from config or fetch all accessible projects"""
-    if config.jira.project_keys is None:
+    if config.atlassian.project_keys is None:
         logger.info("No projects specified, fetching all accessible projects...")
         project_keys = client.get_all_projects()
         if not project_keys:
             logger.error("No projects found")
             return None
     else:
-        project_keys = config.jira.project_keys
+        project_keys = config.atlassian.project_keys
     
     logger.info(f"Projects: {', '.join(project_keys)}")
     return project_keys
@@ -274,7 +274,7 @@ def generate_report(
     if year is None:
         year = datetime.now().year
     if max_workers is None:
-        max_workers = config.jira.max_workers
+        max_workers = config.atlassian.max_workers
     if output_file is None:
         output_file = f"reports/{ReportConfig.get_default_filename(report_type, year)}"
 
@@ -291,7 +291,7 @@ def generate_report(
         return None
 
     logger.info(f"Using parallel processing with {max_workers} workers")
-    logger.info(f"Cache: {'enabled' if config.jira.enable_cache else 'disabled'}")
+    logger.info(f"Cache: {'enabled' if config.atlassian.enable_cache else 'disabled'}")
 
     # Start timing
     start_time = time.time()

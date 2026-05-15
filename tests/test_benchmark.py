@@ -28,7 +28,7 @@ def benchmark():
     # Test 1: With cache disabled
     print("Test 1: Without cache (simulates first run)")
     print("-" * 70)
-    config.jira.enable_cache = False
+    config.atlassian.enable_cache = False
     start = time.time()
     generate_csv_report(config, year=year, output_file="benchmark_nocache.csv")
     nocache_time = time.time() - start
@@ -38,8 +38,8 @@ def benchmark():
     # Test 2: With cache enabled (first run)
     print("Test 2: With cache enabled (first run)")
     print("-" * 70)
-    clear_cache(config.jira.cache_dir)
-    config.jira.enable_cache = True
+    clear_cache(config.atlassian.cache_dir)
+    config.atlassian.enable_cache = True
     start = time.time()
     generate_csv_report(config, year=year, output_file="benchmark_cache1.csv")
     cache1_time = time.time() - start

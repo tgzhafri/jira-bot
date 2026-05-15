@@ -147,9 +147,9 @@ def display_connection_status():
     config = get_current_config()
     if config:
         if st.session_state.get("atlassian_authenticated"):
-            st.sidebar.success(f"✅ Connected (Manual): {config.jira.url}")
+            st.sidebar.success(f"✅ Connected (Manual): {config.atlassian.url}")
         else:
-            st.sidebar.info(f"✅ Connected (Env): {config.jira.url}")
+            st.sidebar.info(f"✅ Connected (Env): {config.atlassian.url}")
     else:
         st.sidebar.warning("❌ Not connected to Atlassian")
 

@@ -14,7 +14,7 @@ def test_imports():
     """Test all imports work"""
     print("Testing imports...")
     try:
-        from src.config import Config, JiraConfig, ReportConfig, ExportConfig
+        from src.config import Config, AtlassianConfig, ReportConfig, ExportConfig
         from src.models import (
             Issue, Worklog, Author, Component, WorkType,
             ProjectComponent, TimeEntry, MonthlyReport, YearlyReport
@@ -107,18 +107,18 @@ def test_models():
 def test_config():
     """Test configuration"""
     print("\nTesting configuration...")
-    from src.config import JiraConfig, ReportConfig, Config
+    from src.config import AtlassianConfig, ReportConfig, Config
     
     try:
-        # Test JiraConfig
-        jira_config = JiraConfig(
+        # Test AtlassianConfig
+        atlassian_config = AtlassianConfig(
             url="https://test.atlassian.net",
             username="test@example.com",
             api_token="test-token-123456",
             project_keys=["TEST"]
         )
-        assert jira_config.validate()
-        print("  ✅ JiraConfig works")
+        assert atlassian_config.validate()
+        print("  ✅ AtlassianConfig works")
         
         # Test ReportConfig
         report_config = ReportConfig(year=2025)
@@ -126,7 +126,7 @@ def test_config():
         print("  ✅ ReportConfig works")
         
         # Test Config
-        config = Config(jira=jira_config, report=report_config)
+        config = Config(atlassian=atlassian_config, report=report_config)
         assert config.validate()
         print("  ✅ Config works")
         
@@ -246,10 +246,10 @@ def test_jira_client_parsing():
     """Test Jira client parsing logic"""
     print("\nTesting Jira client parsing...")
     from src.services.jira_client import JiraClient
-    from src.config import JiraConfig
+    from src.config import AtlassianConfig
     
     try:
-        config = JiraConfig(
+        config = AtlassianConfig(
             url="https://test.atlassian.net",
             username="test@example.com",
             api_token="test-token-123456",

@@ -130,7 +130,7 @@ def show():
         
         with action_col2:
             if st.button("🗑️ Clear Cache", use_container_width=True):
-                cache_path = Path(config.jira.cache_dir)
+                cache_path = Path(config.atlassian.cache_dir)
                 if cache_path.exists():
                     import shutil
                     shutil.rmtree(cache_path)

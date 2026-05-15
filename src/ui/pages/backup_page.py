@@ -21,7 +21,7 @@ def show():
             st.rerun()
         return
 
-    client = JiraClient(config.jira)
+    client = JiraClient(config.atlassian)
     backup_service = BackupService(client)
 
     # Project Selection & Format

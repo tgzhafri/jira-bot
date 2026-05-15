@@ -20,9 +20,9 @@ def test_cache():
     except ValueError as e:
         print(f"⚠️  Config error (expected if .env not set): {e}")
         print("Creating test config...")
-        from src.config import JiraConfig, ReportConfig
+        from src.config import AtlassianConfig, ReportConfig
         config = Config(
-            jira=JiraConfig(
+            atlassian=AtlassianConfig(
                 url="https://test.atlassian.net",
                 username="test@example.com",
                 api_token="test-token",
@@ -34,14 +34,14 @@ def test_cache():
         )
     
     # Ensure cache directory is absolute
-    if not Path(config.jira.cache_dir).is_absolute():
-        config.jira.cache_dir = str(Path.cwd() / config.jira.cache_dir)
+    if not Path(config.atlassian.cache_dir).is_absolute():
+        config.atlassian.cache_dir = str(Path.cwd() / config.atlassian.cache_dir)
     
-    print(f"Cache directory: {config.jira.cache_dir}")
-    print(f"Cache enabled: {config.jira.enable_cache}")
+    print(f"Cache directory: {config.atlassian.cache_dir}")
+    print(f"Cache enabled: {config.atlassian.enable_cache}")
     
     # Check if cache directory exists
-    cache_path = Path(config.jira.cache_dir)
+    cache_path = Path(config.atlassian.cache_dir)
     print(f"Cache path exists: {cache_path.exists()}")
     
     if cache_path.exists():
@@ -54,9 +54,9 @@ def test_cache():
     
     # Initialize client
     client = JiraClient(
-        config.jira,
-        enable_cache=config.jira.enable_cache,
-        cache_dir=config.jira.cache_dir
+        config.atlassian,
+        enable_cache=config.atlassian.enable_cache,
+        cache_dir=config.atlassian.cache_dir
     )
     
     print(f"\nClient cache enabled: {client.enable_cache}")
