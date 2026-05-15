@@ -272,8 +272,9 @@ class ConfluenceCloudClient:
     ) -> Dict[str, bytes]:
         """Download all attachments from a page into memory.
 
-        Uses the library's built-in download method which handles
-        authentication correctly for Confluence Cloud.
+        Uses the official REST API download endpoint per attachment to
+        avoid 401 errors that occur with the library's bulk download
+        method on Confluence Cloud.
 
         Args:
             page_id: The page ID.
@@ -285,31 +286,43 @@ class ConfluenceCloudClient:
             ConfluenceClientError: If the download fails.
         """
         try:
-            result = self._confluence.download_attachments_from_page(
-                page_id, to_memory=True
-            )
-            # Result is either a dict {filename: BytesIO} or an error string
-            if isinstance(result, str):
+            attachments = self.get_attachments_from_page(page_id)
+            if not attachments:
                 return {}
-            # Convert BytesIO objects to bytes
-            return {
-                filename: bio.getvalue()
-                for filename, bio in result.items()
-            }
+
+            result = {}
+            for att in attachments:
+                title = att.get("title", "")
+                att_id = att.get("id", "")
+                if not title or not att_id:
+                    continue
+                try:
+                    content = self._download_attachment_by_id(page_id, att_id)
+                    result[title] = content
+                except ConfluenceClientError as e:
+                    logger.warning(
+                        "Failed to download attachment '%s' from page %s: %s",
+                        title, page_id, e,
+                    )
+            return result
+        except ConfluenceClientError:
+            raise
         except Exception as e:
             raise ConfluenceClientError(
                 "Failed to download attachments for page {}: {}".format(page_id, e)
             ) from e
 
-    @_retry_on_transient
-    def download_attachment(self, download_url: str) -> bytes:
-        """Download a single attachment by its download URL path.
+    def _download_attachment_by_id(
+        self, page_id: str, attachment_id: str
+    ) -> bytes:
+        """Download a single attachment using the official REST API endpoint.
 
-        Uses the atlassian-python-api's built-in GET method which properly
-        handles authentication for Confluence Cloud.
+        Uses GET /wiki/rest/api/content/{pageId}/child/attachment/{attachmentId}/download
+        which properly handles authentication on Confluence Cloud.
 
         Args:
-            download_url: The relative download path from attachment metadata.
+            page_id: The page content ID.
+            attachment_id: The attachment content ID (e.g. 'att12345' or numeric).
 
         Returns:
             Raw bytes of the attachment.
@@ -317,11 +330,87 @@ class ConfluenceCloudClient:
         Raises:
             ConfluenceClientError: If the download fails.
         """
-        try:
-            response = self._confluence.get(
-                download_url, not_json_response=True
+        import requests as req
+        from requests.auth import HTTPBasicAuth
+
+        # Build the full download URL using the official v1 REST endpoint
+        base_url = self.config.url.rstrip("/")
+        if not base_url.endswith("/wiki"):
+            base_url = base_url + "/wiki"
+        download_url = (
+            "{base}/rest/api/content/{page_id}/child/attachment"
+            "/{att_id}/download".format(
+                base=base_url, page_id=page_id, att_id=attachment_id
             )
-            return response
+        )
+
+        try:
+            response = req.get(
+                download_url,
+                auth=HTTPBasicAuth(self.config.username, self.config.api_token),
+                allow_redirects=True,
+                timeout=60,
+            )
+            if response.status_code == 401:
+                raise ConfluenceClientError(
+                    "Unauthorized (401) downloading attachment {}".format(
+                        attachment_id
+                    )
+                )
+            response.raise_for_status()
+            return response.content
+        except ConfluenceClientError:
+            raise
+        except Exception as e:
+            raise ConfluenceClientError(
+                "Failed to download attachment {}: {}".format(attachment_id, e)
+            ) from e
+
+    @_retry_on_transient
+    def download_attachment(self, download_url: str) -> bytes:
+        """Download a single attachment by its relative download URL path.
+
+        Makes a direct HTTP request with Basic Auth credentials to handle
+        Confluence Cloud attachment downloads that require proper auth headers.
+
+        Args:
+            download_url: The relative download path from attachment metadata
+                (e.g. '/wiki/download/attachments/...').
+
+        Returns:
+            Raw bytes of the attachment.
+
+        Raises:
+            ConfluenceClientError: If the download fails.
+        """
+        import requests as req
+        from requests.auth import HTTPBasicAuth
+
+        # Build full URL from the relative download path
+        base_url = self.config.url.rstrip("/")
+        # download_url typically starts with /wiki/... or /download/...
+        if download_url.startswith("/wiki"):
+            full_url = base_url + download_url
+        elif download_url.startswith("/"):
+            full_url = base_url + "/wiki" + download_url
+        else:
+            full_url = base_url + "/wiki/" + download_url
+
+        try:
+            response = req.get(
+                full_url,
+                auth=HTTPBasicAuth(self.config.username, self.config.api_token),
+                allow_redirects=True,
+                timeout=60,
+            )
+            if response.status_code == 401:
+                raise ConfluenceClientError(
+                    "Unauthorized (401)"
+                )
+            response.raise_for_status()
+            return response.content
+        except ConfluenceClientError:
+            raise
         except Exception as e:
             raise ConfluenceClientError(
                 "Failed to download attachment: {}".format(e)

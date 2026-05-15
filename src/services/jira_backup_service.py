@@ -23,12 +23,8 @@ from .jira_client import JiraClient
 
 logger = logging.getLogger(__name__)
 
-# Fields needed for backup (avoid fetching unnecessary data)
-BACKUP_ISSUE_FIELDS = (
-    "key,summary,status,issuetype,priority,assignee,reporter,"
-    "created,updated,components,labels,attachment,description,"
-    "fixVersions,resolution,resolutiondate"
-)
+# Fetch all fields for full backup
+BACKUP_ISSUE_FIELDS = "*all"
 
 
 class JiraBackupService:
@@ -57,7 +53,7 @@ class JiraBackupService:
         """Export data for one or more projects to a temporary ZIP file.
 
         Optimizations over previous implementation:
-        - Fetches issues with minimal fields (BACKUP_ISSUE_FIELDS)
+        - Fetches all issue fields for full backup fidelity
         - Uses larger page size (200) for fewer API calls
         - Streams attachment bytes directly into ZIP (thread-safe)
         - Processes issues in batches for better progress reporting

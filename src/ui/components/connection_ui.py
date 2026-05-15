@@ -143,15 +143,83 @@ def get_current_config():
 
 
 def display_connection_status():
-    """Display connection status indicator"""
+    """Display connection status indicator with page-aware service check."""
     config = get_current_config()
     if config:
         if st.session_state.get("atlassian_authenticated"):
             st.sidebar.success(f"✅ Connected (Manual): {config.atlassian.url}")
         else:
             st.sidebar.info(f"✅ Connected (Env): {config.atlassian.url}")
+
+        # Show service status based on current page
+        current_page = st.session_state.get("current_page", "Dashboard")
+
+        if current_page in ("Manhour Aggregator", "Jira Backup"):
+            jira_status = _check_jira_connection(config)
+            if jira_status:
+                st.sidebar.success("✅ Jira: Connected")
+            else:
+                st.sidebar.warning("❌ Jira: Disconnected")
+        elif current_page == "Confluence Backup":
+            confluence_status = _check_confluence_connection(config)
+            if confluence_status:
+                st.sidebar.success("✅ Confluence Cloud: Connected")
+            else:
+                st.sidebar.warning("❌ Confluence Cloud: Disconnected")
     else:
         st.sidebar.warning("❌ Not connected to Atlassian")
+
+
+def _check_jira_connection(config: Config) -> bool:
+    """Check Jira connection with session-state caching (60s TTL)."""
+    import time
+
+    cache_key = "_jira_conn_status"
+    cache_time_key = "_jira_conn_check_time"
+    ttl_seconds = 60
+
+    if cache_key in st.session_state:
+        last_check = st.session_state.get(cache_time_key, 0)
+        if time.time() - last_check < ttl_seconds:
+            return st.session_state[cache_key]
+
+    try:
+        client = JiraClient(config.atlassian, enable_cache=False)
+        result = client.test_connection()
+    except Exception:
+        result = False
+
+    st.session_state[cache_key] = result
+    st.session_state[cache_time_key] = time.time()
+    return result
+
+
+def _check_confluence_connection(config: Config) -> bool:
+    """Check Confluence connection with session-state caching (60s TTL)."""
+    import time
+
+    cache_key = "_confluence_sidebar_conn_status"
+    cache_time_key = "_confluence_sidebar_conn_check_time"
+    ttl_seconds = 60
+
+    if cache_key in st.session_state:
+        last_check = st.session_state.get(cache_time_key, 0)
+        if time.time() - last_check < ttl_seconds:
+            return st.session_state[cache_key]
+
+    try:
+        confluence_config = get_confluence_config()
+        if not confluence_config:
+            result = False
+        else:
+            client = ConfluenceCloudClient(confluence_config)
+            result = client.test_connection()
+    except Exception:
+        result = False
+
+    st.session_state[cache_key] = result
+    st.session_state[cache_time_key] = time.time()
+    return result
 
 
 def get_confluence_config() -> Optional[AtlassianConfig]:

@@ -96,9 +96,10 @@ def run_backup_with_progress(
 
     Orchestrates the common backup workflow:
     1. Show "do not navigate away" warning
-    2. Execute the backup function
-    3. Read the resulting ZIP into memory and clean up
-    4. Render the download card
+    2. Show a progress bar
+    3. Execute the backup function
+    4. Read the resulting ZIP into memory and clean up
+    5. Render the download card
 
     Args:
         backup_fn: A callable that performs the backup and returns the path
@@ -115,10 +116,20 @@ def run_backup_with_progress(
         "active to complete the download preparation."
     )
 
+    progress_bar = st.progress(0.0)
+    status_text = st.empty()
+    status_text.text("Starting backup for {}...".format(display_name))
+
     try:
+        progress_bar.progress(0.1)
+        status_text.text("Backing up {}...".format(display_name))
+
         zip_path = backup_fn()
 
+        progress_bar.progress(1.0)
+        status_text.empty()
         warning_placeholder.empty()
+        progress_bar.empty()
 
         if not zip_path:
             st.error("❌ Backup failed for **{name}**.".format(name=display_name))
@@ -137,6 +148,8 @@ def run_backup_with_progress(
 
     except Exception as e:
         warning_placeholder.empty()
+        progress_bar.empty()
+        status_text.empty()
         st.error("❌ Backup failed: {}".format(e))
         logger.exception("Backup failed for %s", display_name)
 
