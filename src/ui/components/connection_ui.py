@@ -119,12 +119,12 @@ def get_current_config():
     """Get Config object using current session credentials or environment variables"""
     # 1. Try session state (manual override)
     if st.session_state.get("atlassian_authenticated") and st.session_state.atlassian_url:
-        jira_config = AtlassianConfig(
+        atlassian_config = AtlassianConfig(
             url=st.session_state.atlassian_url,
             username=st.session_state.atlassian_username,
             api_token=st.session_state.atlassian_api_token,
         )
-        return Config(jira=jira_config)
+        return Config(atlassian=atlassian_config)
 
     # 2. Try environment variables
     try:
@@ -133,9 +133,9 @@ def get_current_config():
         token = get_secret("ATLASSIAN_API_TOKEN")
 
         if all([url, user, token]):
-            jira_config = AtlassianConfig(url=url, username=user, api_token=token)
-            jira_config.validate()
-            return Config(jira=jira_config)
+            atlassian_config = AtlassianConfig(url=url, username=user, api_token=token)
+            atlassian_config.validate()
+            return Config(atlassian=atlassian_config)
     except Exception:
         pass
 
