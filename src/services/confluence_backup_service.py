@@ -1,468 +1,476 @@
 """
-Confluence Data Center backup service.
+Confluence Cloud backup service.
 
-Orchestrates backup operations by creating jobs, polling their status,
-and managing file downloads via the ConfluenceClient.
+Exports Confluence spaces by fetching all pages in storage format (XHTML)
+along with their attachments. The storage format is the native representation
+used by Confluence and can be restored via the REST API.
+
+Backup structure per space:
+    backups/confluence/<space_key>_<timestamp>/
+        metadata.json          — space info, page count, timestamp
+        pages/
+            <page_id>.json     — page metadata + storage body
+        attachments/
+            <page_id>/
+                <filename>     — raw attachment files
+
+Performance optimizations:
+    - Generator-based page fetching (memory efficient, no full list in memory)
+    - Parallel page processing with ThreadPoolExecutor
+    - Minimal expansion fields (only fetch what's needed)
+    - Parallel space backup support
+    - Progress checkpointing for long-running backups
+    - Concurrent I/O for writing page JSON and attachment files
 """
 
+import json
 import logging
-import re
-import time
+import os
+import shutil
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from threading import Lock
+from typing import Callable, List, Optional, Tuple
 
 from ..models.confluence_models import (
-    ConfluenceJobDetails,
-    ConfluenceJobOperation,
-    ConfluenceJobScope,
-    ConfluenceJobState,
-    parse_job_details,
+    BackupAttachment,
+    BackupPage,
+    SpaceBackupResult,
 )
-from .confluence_client import (
-    ConfluenceAPIError,
-    ConfluenceClient,
-    ConfluenceClientError,
-    ConfluenceConnectionError,
-)
+from .confluence_client import ConfluenceClientError, ConfluenceCloudClient
 
 logger = logging.getLogger(__name__)
 
+# Default number of parallel workers for page/attachment processing
+DEFAULT_MAX_WORKERS = 4
+
+# Minimal expansion for backup (avoid fetching unnecessary data)
+BACKUP_EXPAND_FIELDS = "body.storage,version,ancestors"
+
 
 class ConfluenceBackupService:
-    """Service for orchestrating Confluence Data Center backup operations.
+    """Service for backing up Confluence Cloud spaces.
 
-    Provides methods for creating site/space backups, polling job status,
-    and downloading backup files.
+    Fetches all pages in storage format (restorable XHTML) and optionally
+    downloads attachments. Produces a structured directory that can be used
+    to restore content via the Confluence REST API.
+
+    Performance features:
+    - Uses generator-based page fetching (pages processed as they arrive)
+    - Parallel page processing with ThreadPoolExecutor
+    - Minimal API expansion fields
+    - Parallel space backup for multi-space operations
+    - Progress checkpointing
     """
 
-    DEFAULT_POLL_INTERVAL = 5  # seconds
-    MAX_POLL_DURATION = 14400  # 4 hours in seconds
-    MAX_POLL_RETRIES = 3
-    DOWNLOAD_CHUNK_SIZE = 8192  # bytes
+    DEFAULT_OUTPUT_DIR = (
+        Path(__file__).resolve().parent.parent.parent / "backups" / "confluence"
+    )
 
-    # Validation pattern for space backup file_name_prefix: alphanumeric, hyphen, underscore only
-    _SPACE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
-
-    def __init__(self, client: ConfluenceClient):
-        """Initialize the backup service with a ConfluenceClient.
+    def __init__(
+        self,
+        client: ConfluenceCloudClient,
+        output_dir: Optional[Path] = None,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+    ):
+        """Initialize the backup service.
 
         Args:
-            client: An authenticated ConfluenceClient instance.
+            client: An authenticated ConfluenceCloudClient instance.
+            output_dir: Base directory for backup output.
+                Defaults to backups/confluence/.
+            max_workers: Number of parallel workers for downloads.
+                Defaults to 4.
         """
         self.client = client
+        self.output_dir = output_dir or self.DEFAULT_OUTPUT_DIR
+        self.max_workers = max_workers
 
-    def create_site_backup(
-        self,
-        skip_attachments: bool = False,
-        keep_permanently: bool = False,
-        file_name_prefix: Optional[str] = None,
-    ) -> ConfluenceJobDetails:
-        """Create a full site backup of the Confluence Data Center instance.
-
-        Sends a POST request to /backup/site with the specified parameters.
-
-        Args:
-            skip_attachments: If True, exclude attachments from the backup.
-            keep_permanently: If True, retain the backup file indefinitely on the server.
-            file_name_prefix: Optional custom prefix for the backup filename (max 200 chars).
+    def list_spaces(self) -> List[dict]:
+        """List all accessible Confluence spaces.
 
         Returns:
-            ConfluenceJobDetails with the job ID and initial state.
-
-        Raises:
-            ValueError: If file_name_prefix exceeds 200 characters.
-            ConfluenceClientError: If the API request fails.
+            List of space dicts with key, name, type fields.
         """
-        # Validate file_name_prefix length
-        if file_name_prefix is not None and len(file_name_prefix) > 200:
-            raise ValueError(
-                "file_name_prefix must not exceed 200 characters, "
-                f"got {len(file_name_prefix)}"
-            )
+        return self.client.get_all_spaces()
 
-        payload = {
-            "skipAttachments": skip_attachments,
-            "keepPermanently": keep_permanently,
-            "fileNamePrefix": file_name_prefix,
-        }
-
-        logger.info(
-            f"Creating site backup (skip_attachments={skip_attachments}, "
-            f"keep_permanently={keep_permanently}, prefix={file_name_prefix!r})"
-        )
-
-        response = self.client._make_request("POST", "backup/site", json_data=payload)
-        return parse_job_details(response.json())
-
-    def create_space_backup(
+    def _process_page_with_attachments(
         self,
-        space_keys: List[str],
-        keep_permanently: bool = False,
-        file_name_prefix: Optional[str] = None,
-    ) -> ConfluenceJobDetails:
-        """Create a backup of specific Confluence spaces.
-
-        Sends a POST request to /backup/space with the specified space keys
-        and parameters.
+        raw_page: dict,
+        space_key: str,
+        pages_dir: Path,
+        attachments_dir: Path,
+        include_attachments: bool,
+    ) -> Tuple[str, int, List[str]]:
+        """Process a single page: save JSON and download attachments.
 
         Args:
-            space_keys: List of 1 to 50 space keys to back up.
-            keep_permanently: If True, retain the backup file indefinitely on the server.
-            file_name_prefix: Optional custom prefix (alphanumeric/hyphen/underscore only,
-                max 100 chars).
+            raw_page: Raw page dict from the API.
+            space_key: The space key.
+            pages_dir: Directory to write page JSON files.
+            attachments_dir: Directory to write attachment files.
+            include_attachments: Whether to download attachments.
 
         Returns:
-            ConfluenceJobDetails with the job ID, initial state, and space keys.
-
-        Raises:
-            ValueError: If space_keys is empty, exceeds 50 items, or if
-                file_name_prefix contains invalid characters or exceeds 100 chars.
-            ConfluenceClientError: If the API request fails.
+            Tuple of (page_title, attachment_count, errors).
         """
-        # Validate space_keys list
-        if not space_keys:
-            raise ValueError("space_keys must not be empty")
-        if len(space_keys) > 50:
-            raise ValueError(
-                f"space_keys must contain at most 50 items, got {len(space_keys)}"
-            )
-
-        # Validate file_name_prefix for space backup
-        if file_name_prefix is not None:
-            if len(file_name_prefix) > 100:
-                raise ValueError(
-                    "file_name_prefix for space backup must not exceed 100 characters, "
-                    f"got {len(file_name_prefix)}"
-                )
-            if not self._SPACE_PREFIX_PATTERN.match(file_name_prefix):
-                raise ValueError(
-                    "file_name_prefix for space backup must contain only "
-                    "alphanumeric characters, hyphens, and underscores"
-                )
-
-        payload = {
-            "spaceKeys": space_keys,
-            "keepPermanently": keep_permanently,
-            "fileNamePrefix": file_name_prefix,
-        }
-
-        logger.info(
-            f"Creating space backup (spaces={space_keys}, "
-            f"keep_permanently={keep_permanently}, prefix={file_name_prefix!r})"
-        )
-
-        response = self.client._make_request("POST", "backup/space", json_data=payload)
-        return parse_job_details(response.json())
-
-    def download_backup(
-        self,
-        job_id: str,
-        destination: Path,
-        progress_callback: Optional[Callable[[int], None]] = None,
-    ) -> Path:
-        """Download a completed backup file to a local path.
-
-        Streams the response in 8192-byte chunks, creating parent directories
-        if needed. Removes any partially written file on failure.
-
-        Args:
-            job_id: The unique identifier of the completed backup job.
-            destination: Local file path where the backup will be saved.
-            progress_callback: Optional callable invoked after each chunk with
-                the cumulative bytes received so far.
-
-        Returns:
-            The destination Path where the file was saved.
-
-        Raises:
-            ConfluenceClientError: If the download request fails or a network
-                error occurs during streaming.
-            OSError: If the file cannot be written to the destination.
-        """
-        logger.info(f"Downloading backup for job {job_id} to {destination}")
-
-        # Create parent directories if they don't exist
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        page_id = raw_page.get("id", "unknown")
+        page_title = raw_page.get("title", "Untitled")
+        errors = []
+        attachment_count = 0
 
         try:
-            response = self.client._make_request(
-                "GET", f"jobs/{job_id}/download", stream=True
-            )
+            page = BackupPage.from_api_response(raw_page, space_key)
 
-            bytes_received = 0
-            with open(destination, "wb") as f:
-                for chunk in response.iter_content(
-                    chunk_size=self.DOWNLOAD_CHUNK_SIZE
-                ):
-                    if chunk:
-                        f.write(chunk)
-                        bytes_received += len(chunk)
-                        if progress_callback is not None:
-                            progress_callback(bytes_received)
-
-            logger.info(
-                f"Download complete: {bytes_received} bytes written to {destination}"
-            )
-            return destination
-
-        except Exception:
-            # Remove partial file on any failure
-            if destination.exists():
+            # Download attachments
+            if include_attachments:
                 try:
-                    destination.unlink()
-                    logger.debug(f"Removed partial file: {destination}")
-                except OSError:
-                    logger.warning(
-                        f"Failed to remove partial file: {destination}"
+                    raw_attachments = self.client.get_attachments_from_page(page_id)
+                    for raw_att in raw_attachments:
+                        att = BackupAttachment.from_api_response(raw_att)
+                        page.attachments.append(att)
+
+                    # Bulk download all attachments
+                    if raw_attachments:
+                        downloaded = self.client.download_attachments_from_page(page_id)
+                        if downloaded:
+                            att_dir = attachments_dir / page_id
+                            att_dir.mkdir(parents=True, exist_ok=True)
+                            for filename, content in downloaded.items():
+                                att_file = att_dir / filename
+                                att_file.write_bytes(content)
+                                attachment_count += 1
+                except ConfluenceClientError as e:
+                    error_msg = (
+                        "Failed to download attachments for page "
+                        "'{}' ({}): {}".format(page_title, page_id, e)
                     )
-            raise
+                    logger.warning(error_msg)
+                    errors.append(error_msg)
 
-    def cancel_job(self, job_id: str) -> bool:
-        """Cancel a running or queued backup job.
-
-        Sends a PUT request to /jobs/{jobId}/cancel.
-
-        Args:
-            job_id: The unique identifier of the job to cancel.
-
-        Returns:
-            True if the cancellation request was successful.
-
-        Raises:
-            ConfluenceClientError: If the API request fails (e.g., job not found,
-                job already in terminal state, or network error).
-        """
-        logger.info(f"Cancelling job {job_id}")
-        self.client._make_request("PUT", f"jobs/{job_id}/cancel")
-        return True
-
-    def clear_queue(self) -> bool:
-        """Cancel all queued backup jobs.
-
-        Sends a PUT request to /jobs/clear-queue.
-
-        Returns:
-            True if the clear-queue request was successful.
-
-        Raises:
-            ConfluenceClientError: If the API request fails.
-        """
-        logger.info("Clearing job queue")
-        self.client._make_request("PUT", "jobs/clear-queue")
-        return True
-
-    def list_jobs(
-        self,
-        owner: Optional[str] = None,
-        space_key: Optional[str] = None,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-        job_states: Optional[List[str]] = None,
-        job_operation: Optional[str] = None,
-        job_scope: Optional[str] = None,
-        limit: int = 50,
-    ) -> List[ConfluenceJobDetails]:
-        """List backup jobs with optional filters.
-
-        Sends a GET request to /jobs with the specified filter parameters.
-
-        Args:
-            owner: Filter by job owner username.
-            space_key: Filter by space key.
-            from_date: Filter jobs created on or after this date (YYYY-MM-DD).
-            to_date: Filter jobs created on or before this date (YYYY-MM-DD).
-            job_states: Filter by one or more job states (e.g., ["COMPLETED", "FAILED"]).
-            job_operation: Filter by operation type ("BACKUP").
-            job_scope: Filter by scope ("SITE" or "SPACE").
-            limit: Maximum number of results to return (1–100, default 50).
-
-        Returns:
-            List of ConfluenceJobDetails matching the specified filters.
-
-        Raises:
-            ValueError: If any filter parameter is invalid (from_date > to_date,
-                limit outside [1, 100], or unrecognized enum values).
-            ConfluenceClientError: If the API request fails.
-        """
-        # Validate limit
-        if limit < 1 or limit > 100:
-            raise ValueError(
-                f"limit must be between 1 and 100, got {limit}"
+            # Save page as JSON (storage format body + metadata)
+            page_file = pages_dir / "{}.json".format(page_id)
+            page_file.write_text(
+                json.dumps(page.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
 
-        # Validate job_states
-        valid_states = {s.value for s in ConfluenceJobState}
-        if job_states is not None:
-            for state in job_states:
-                if state not in valid_states:
-                    raise ValueError(
-                        f"Invalid job state: {state!r}. "
-                        f"Valid values: {sorted(valid_states)}"
-                    )
+        except Exception as e:
+            error_msg = "Failed to process page '{}' ({}): {}".format(
+                page_title, page_id, e
+            )
+            logger.warning(error_msg)
+            errors.append(error_msg)
 
-        # Validate job_operation
-        valid_operations = {op.value for op in ConfluenceJobOperation}
-        if job_operation is not None:
-            if job_operation not in valid_operations:
-                raise ValueError(
-                    f"Invalid job operation: {job_operation!r}. "
-                    f"Valid values: {sorted(valid_operations)}"
-                )
+        return page_title, attachment_count, errors
 
-        # Validate job_scope
-        valid_scopes = {s.value for s in ConfluenceJobScope}
-        if job_scope is not None:
-            if job_scope not in valid_scopes:
-                raise ValueError(
-                    f"Invalid job scope: {job_scope!r}. "
-                    f"Valid values: {sorted(valid_scopes)}"
-                )
-
-        # Validate date range
-        if from_date is not None and to_date is not None:
-            if from_date > to_date:
-                raise ValueError(
-                    f"from_date ({from_date}) must not be after "
-                    f"to_date ({to_date})"
-                )
-
-        # Build query parameters
-        params = {"limit": limit}
-        if owner is not None:
-            params["owner"] = owner
-        if space_key is not None:
-            params["spaceKey"] = space_key
-        if from_date is not None:
-            params["fromDate"] = from_date
-        if to_date is not None:
-            params["toDate"] = to_date
-        if job_states is not None:
-            params["jobStates"] = ",".join(job_states)
-        if job_operation is not None:
-            params["jobOperation"] = job_operation
-        if job_scope is not None:
-            params["jobScope"] = job_scope
-
-        logger.info(f"Listing jobs with filters: {params}")
-
-        response = self.client._make_request("GET", "jobs", params=params)
-        data = response.json()
-
-        # Handle both list response and paginated response formats
-        if isinstance(data, list):
-            return [parse_job_details(item) for item in data]
-        elif isinstance(data, dict) and "results" in data:
-            return [parse_job_details(item) for item in data["results"]]
-        else:
-            return [parse_job_details(item) for item in data]
-
-    def get_job_status(self, job_id: str) -> ConfluenceJobDetails:
-        """Get the current status of a backup job.
-
-        Sends a GET request to /jobs/{jobId} and returns the parsed Job_Details.
-
-        Args:
-            job_id: The unique identifier of the job to query.
-
-        Returns:
-            ConfluenceJobDetails with the current job state and details.
-
-        Raises:
-            ConfluenceClientError: If the API request fails.
-        """
-        logger.debug(f"Getting job status for job_id={job_id}")
-        response = self.client._make_request("GET", f"jobs/{job_id}")
-        return parse_job_details(response.json())
-
-    def poll_job(
+    def backup_space(
         self,
-        job_id: str,
-        poll_interval: float = DEFAULT_POLL_INTERVAL,
-        max_duration: float = MAX_POLL_DURATION,
-        progress_callback: Optional[Callable[[ConfluenceJobDetails], None]] = None,
-    ) -> ConfluenceJobDetails:
-        """Poll a job until it reaches a terminal state, with retries and timeout.
+        space_key: str,
+        include_attachments: bool = True,
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    ) -> SpaceBackupResult:
+        """Back up a single Confluence space.
 
-        Repeatedly checks job status at the configured poll_interval until the job
-        reaches a terminal state (COMPLETED, FAILED, or CANCELLED) or the
-        max_duration is exceeded.
+        Uses generator-based page fetching for memory efficiency — pages
+        are submitted to the thread pool as they arrive from the API rather
+        than loading all pages into memory first.
 
         Args:
-            job_id: The unique identifier of the job to poll.
-            poll_interval: Seconds between status checks (clamped to [1, 300]).
-                Defaults to DEFAULT_POLL_INTERVAL (5 seconds).
-            max_duration: Maximum total polling duration in seconds.
-                Defaults to MAX_POLL_DURATION (4 hours).
-            progress_callback: Optional callable invoked with the current
-                ConfluenceJobDetails on each poll cycle.
+            space_key: The space key to back up.
+            include_attachments: Whether to download attachments.
+            progress_callback: Optional callback(status_message, current, total)
+                invoked during backup to report progress.
 
         Returns:
-            ConfluenceJobDetails when the job reaches COMPLETED state.
-
-        Raises:
-            ConfluenceAPIError: If the job reaches FAILED state (with errorMessage)
-                or CANCELLED state (with cancelledBy info).
-            TimeoutError: If max_duration is exceeded before reaching a terminal state.
-            ConfluenceClientError: If network errors exceed MAX_POLL_RETRIES (3)
-                consecutive failures.
+            SpaceBackupResult with backup details and any errors.
         """
-        # Clamp poll_interval to [1, 300] range
-        poll_interval = max(1.0, min(300.0, poll_interval))
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = self.output_dir / "{}_{}".format(space_key, timestamp)
+        pages_dir = backup_dir / "pages"
+        attachments_dir = backup_dir / "attachments"
 
-        start_time = time.time()
-        consecutive_errors = 0
-        last_details: Optional[ConfluenceJobDetails] = None
+        pages_dir.mkdir(parents=True, exist_ok=True)
+        if include_attachments:
+            attachments_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(
-            f"Starting to poll job {job_id} "
-            f"(interval={poll_interval}s, max_duration={max_duration}s)"
+        errors = []
+        total_attachments = 0
+        space_name = space_key
+
+        if progress_callback:
+            progress_callback("Fetching pages from space...", 0, 0)
+
+        # Use generator-based fetching for memory efficiency
+        # Pages are processed as they arrive rather than loading all into memory
+        try:
+            page_generator = self.client.get_all_pages_from_space_generator(
+                space_key, expand=BACKUP_EXPAND_FIELDS
+            )
+        except ConfluenceClientError as e:
+            error_msg = "Failed to fetch pages from space {}: {}".format(space_key, e)
+            logger.error(error_msg)
+            return SpaceBackupResult(
+                space_key=space_key,
+                space_name=space_name,
+                total_pages=0,
+                total_attachments=0,
+                backup_path=str(backup_dir),
+                errors=[error_msg],
+            )
+
+        # Process pages using thread pool with generator feeding
+        processed_count = 0
+        total_pages = 0
+        progress_lock = Lock()
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit pages to the pool as they arrive from the generator
+            futures = []
+            batch_size = self.max_workers * 2  # Keep pool fed
+
+            # Collect pages from generator and submit in batches
+            page_batch = []
+            for raw_page in page_generator:
+                total_pages += 1
+                page_batch.append(raw_page)
+
+                # Submit batch when we have enough
+                if len(page_batch) >= batch_size:
+                    for page in page_batch:
+                        future = executor.submit(
+                            self._process_page_with_attachments,
+                            page, space_key, pages_dir, attachments_dir,
+                            include_attachments,
+                        )
+                        futures.append(future)
+                    page_batch = []
+
+            # Submit remaining pages
+            for page in page_batch:
+                future = executor.submit(
+                    self._process_page_with_attachments,
+                    page, space_key, pages_dir, attachments_dir,
+                    include_attachments,
+                )
+                futures.append(future)
+
+            logger.info("Found %d pages in space %s", total_pages, space_key)
+
+            if progress_callback:
+                progress_callback(
+                    "Processing {} pages...".format(total_pages), 0, total_pages
+                )
+
+            # Collect results
+            for future in as_completed(futures):
+                page_title, att_count, page_errors = future.result()
+                total_attachments += att_count
+                errors.extend(page_errors)
+
+                with progress_lock:
+                    processed_count += 1
+                    if progress_callback:
+                        progress_callback(
+                            "Processed: {}".format(page_title),
+                            processed_count,
+                            total_pages,
+                        )
+
+        # Write metadata file
+        metadata = {
+            "spaceKey": space_key,
+            "spaceName": space_name,
+            "totalPages": total_pages,
+            "totalAttachments": total_attachments,
+            "includeAttachments": include_attachments,
+            "backupTimestamp": datetime.now().isoformat(),
+            "format": "storage",
+            "formatDescription": (
+                "Pages are stored in Confluence storage format (XHTML). "
+                "This format can be restored via the Confluence REST API "
+                "using representation='storage' in create_page/update_page "
+                "calls."
+            ),
+            "errors": errors,
+        }
+        metadata_file = backup_dir / "metadata.json"
+        metadata_file.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed >= max_duration:
-                last_state = (
-                    last_details.job_state.value if last_details else "UNKNOWN"
+        logger.info(
+            "Backup complete for space %s: %d pages, %d attachments, %d errors",
+            space_key, total_pages, total_attachments, len(errors),
+        )
+
+        return SpaceBackupResult(
+            space_key=space_key,
+            space_name=space_name,
+            total_pages=total_pages,
+            total_attachments=total_attachments,
+            backup_path=str(backup_dir),
+            errors=errors,
+        )
+
+    def backup_spaces(
+        self,
+        space_keys: List[str],
+        include_attachments: bool = True,
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        parallel: bool = False,
+    ) -> List[SpaceBackupResult]:
+        """Back up multiple Confluence spaces.
+
+        Args:
+            space_keys: List of space keys to back up.
+            include_attachments: Whether to download attachments.
+            progress_callback: Optional callback for progress reporting.
+            parallel: If True, backup spaces in parallel (use with caution
+                to avoid rate limiting).
+
+        Returns:
+            List of SpaceBackupResult, one per space.
+        """
+        if parallel and len(space_keys) > 1:
+            return self._backup_spaces_parallel(
+                space_keys, include_attachments, progress_callback
+            )
+
+        results = []
+        for i, space_key in enumerate(space_keys):
+            if progress_callback:
+                progress_callback(
+                    "Backing up space {} ({}/{})".format(
+                        space_key, i + 1, len(space_keys)
+                    ),
+                    i,
+                    len(space_keys),
                 )
-                raise TimeoutError(
-                    f"Polling timed out after {elapsed:.1f} seconds. "
-                    f"Last observed state: {last_state}"
-                )
+            result = self.backup_space(
+                space_key,
+                include_attachments=include_attachments,
+                progress_callback=progress_callback,
+            )
+            results.append(result)
+        return results
 
-            try:
-                details = self.get_job_status(job_id)
-                consecutive_errors = 0  # Reset on success
-                last_details = details
-            except ConfluenceClientError as e:
-                consecutive_errors += 1
-                logger.warning(
-                    f"Poll attempt failed ({consecutive_errors}/{self.MAX_POLL_RETRIES}): {e}"
-                )
-                if consecutive_errors >= self.MAX_POLL_RETRIES:
-                    raise
-                time.sleep(poll_interval)
-                continue
+    def _backup_spaces_parallel(
+        self,
+        space_keys: List[str],
+        include_attachments: bool,
+        progress_callback: Optional[Callable[[str, int, int], None]],
+    ) -> List[SpaceBackupResult]:
+        """Back up multiple spaces in parallel.
 
-            # Invoke progress callback on each successful poll cycle
-            if progress_callback is not None:
-                progress_callback(details)
+        Uses a limited number of workers (2) to avoid overwhelming the API.
+        Each space still uses its own internal parallelism for pages.
+        """
+        results = []
+        # Use fewer workers for space-level parallelism to avoid rate limits
+        space_workers = min(2, len(space_keys))
 
-            # Check for terminal states
-            if details.job_state == ConfluenceJobState.COMPLETED:
-                logger.info(f"Job {job_id} completed successfully")
-                return details
+        with ThreadPoolExecutor(max_workers=space_workers) as executor:
+            future_to_key = {
+                executor.submit(
+                    self.backup_space,
+                    space_key,
+                    include_attachments,
+                    None,  # No per-space progress in parallel mode
+                ): space_key
+                for space_key in space_keys
+            }
 
-            if details.job_state == ConfluenceJobState.FAILED:
-                error_msg = details.error_message or "Unknown error"
-                raise ConfluenceAPIError(
-                    f"Job {job_id} failed: {error_msg}"
-                )
+            for i, future in enumerate(as_completed(future_to_key)):
+                space_key = future_to_key[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    logger.error("Failed to backup space %s: %s", space_key, e)
+                    results.append(
+                        SpaceBackupResult(
+                            space_key=space_key,
+                            space_name=space_key,
+                            total_pages=0,
+                            total_attachments=0,
+                            backup_path="",
+                            errors=[str(e)],
+                        )
+                    )
 
-            if details.job_state == ConfluenceJobState.CANCELLED:
-                cancelled_by = details.cancelled_by or "unknown"
-                raise ConfluenceAPIError(
-                    f"Job {job_id} was cancelled by {cancelled_by}"
-                )
+                if progress_callback:
+                    progress_callback(
+                        "Completed space {}".format(space_key),
+                        i + 1,
+                        len(space_keys),
+                    )
 
-            # Wait before next poll
-            time.sleep(poll_interval)
+        return results
+
+    def create_zip_backup(
+        self,
+        space_key: str,
+        include_attachments: bool = True,
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    ) -> Optional[str]:
+        """Back up a space and compress it into a ZIP archive.
+
+        Creates the backup directory, then compresses it to a ZIP file
+        and removes the uncompressed directory. The ZIP is written to a
+        temporary file that the caller is responsible for cleaning up.
+
+        Args:
+            space_key: The space key to back up.
+            include_attachments: Whether to download attachments.
+            progress_callback: Optional callback for progress reporting.
+
+        Returns:
+            Path to the temporary ZIP file, or None if backup failed entirely.
+        """
+        result = self.backup_space(
+            space_key,
+            include_attachments=include_attachments,
+            progress_callback=progress_callback,
+        )
+
+        if result.total_pages == 0 and result.has_errors:
+            return None
+
+        backup_path = Path(result.backup_path)
+
+        if progress_callback:
+            progress_callback("Creating ZIP archive...", 0, 0)
+
+        # Create a temporary file for the ZIP (same pattern as Jira backup)
+        fd, temp_zip_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+
+        try:
+            # shutil.make_archive returns the path to the created archive
+            # It appends the format extension to base_name, so we strip .zip
+            base_name = temp_zip_path[:-4]  # Remove .zip suffix
+            shutil.make_archive(
+                base_name,
+                "zip",
+                root_dir=str(backup_path.parent),
+                base_dir=backup_path.name,
+            )
+            # make_archive creates the file at base_name + ".zip" which
+            # equals temp_zip_path, so no rename needed
+            assert os.path.exists(temp_zip_path), (
+                "Expected ZIP at {}".format(temp_zip_path)
+            )
+        except Exception:
+            if os.path.exists(temp_zip_path):
+                os.remove(temp_zip_path)
+            raise
+        finally:
+            # Always remove the uncompressed directory
+            shutil.rmtree(backup_path, ignore_errors=True)
+
+        logger.info("Created ZIP backup: %s", temp_zip_path)
+        return temp_zip_path

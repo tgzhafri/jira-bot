@@ -1,8 +1,8 @@
 """
 Data models for Automate Jira and Confluence backup operations.
 
-Re-exports all models from the original Jira models module and the new
-Confluence backup models module for backward compatibility.
+Re-exports all models from the original Jira models module and the
+Confluence Cloud backup models module.
 """
 
 # Re-export all original Jira models for backward compatibility
@@ -18,14 +18,11 @@ from ._models import (
     YearlyReport,
 )
 
-# Export Confluence backup models
+# Export Confluence Cloud backup models
 from .confluence_models import (
-    ConfluenceJobDetails,
-    ConfluenceJobOperation,
-    ConfluenceJobScope,
-    ConfluenceJobState,
-    ConfluenceStatistics,
-    parse_job_details,
+    BackupAttachment,
+    BackupPage,
+    SpaceBackupResult,
 )
 
 __all__ = [
@@ -40,10 +37,7 @@ __all__ = [
     "Worklog",
     "YearlyReport",
     # Confluence models
-    "ConfluenceJobState",
-    "ConfluenceJobOperation",
-    "ConfluenceJobScope",
-    "ConfluenceStatistics",
-    "ConfluenceJobDetails",
-    "parse_job_details",
+    "BackupAttachment",
+    "BackupPage",
+    "SpaceBackupResult",
 ]

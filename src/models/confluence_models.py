@@ -1,198 +1,132 @@
 """
-Data models for Confluence Data Center backup operations.
+Data models for Confluence Cloud backup operations.
 
-Defines enums for job state, operation, and scope; dataclasses for job details
-and statistics; and a parsing function for converting API JSON responses into
-typed Python objects.
+Defines dataclasses for representing backed-up pages, attachments,
+and space backup metadata.
 """
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import List, Optional
-
-
-class ConfluenceJobState(Enum):
-    """Job lifecycle states for Confluence backup operations."""
-
-    QUEUED = "QUEUED"
-    IN_PROGRESS = "IN_PROGRESS"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
-    CANCELLED = "CANCELLED"
-
-
-class ConfluenceJobOperation(Enum):
-    """Types of Confluence backup operations."""
-
-    BACKUP = "BACKUP"
-
-
-class ConfluenceJobScope(Enum):
-    """Scope of a Confluence backup job."""
-
-    SITE = "SITE"
-    SPACE = "SPACE"
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class ConfluenceStatistics:
-    """Progress statistics for a Confluence backup job.
-
-    All count fields must be non-negative integers.
-    """
-
-    total_objects_count: int = 0
-    processed_objects_count: int = 0
-    persisted_objects_count: int = 0
-    skipped_objects_count: int = 0
-    reused_objects_count: int = 0
-
-    def __post_init__(self):
-        for field_name in [
-            "total_objects_count",
-            "processed_objects_count",
-            "persisted_objects_count",
-            "skipped_objects_count",
-            "reused_objects_count",
-        ]:
-            if getattr(self, field_name) < 0:
-                raise ValueError(f"{field_name} must be >= 0")
-
-
-@dataclass
-class ConfluenceJobDetails:
-    """Full details of a Confluence backup job.
-
-    Represents the structured response from the Confluence Data Center
-    Backup REST API.
-    """
+class BackupAttachment:
+    """Represents a backed-up attachment."""
 
     id: str
-    job_operation: ConfluenceJobOperation
-    job_scope: ConfluenceJobScope
-    job_state: ConfluenceJobState
-    create_time: Optional[datetime] = None
-    start_processing_time: Optional[datetime] = None
-    finish_processing_time: Optional[datetime] = None
-    cancel_time: Optional[datetime] = None
-    error_message: Optional[str] = None
-    owner: Optional[str] = None
-    cancelled_by: Optional[str] = None
-    file_name: Optional[str] = None
-    space_keys: List[str] = field(default_factory=list)
-    file_delete_time: Optional[datetime] = None
-    file_exists: bool = True
-    statistics: Optional[ConfluenceStatistics] = None
+    title: str
+    file_name: str
+    media_type: str
+    file_size: int
+    download_path: str
 
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the job has reached a terminal (final) state."""
-        return self.job_state in (
-            ConfluenceJobState.COMPLETED,
-            ConfluenceJobState.FAILED,
-            ConfluenceJobState.CANCELLED,
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for JSON export."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "fileName": self.file_name,
+            "mediaType": self.media_type,
+            "fileSize": self.file_size,
+            "downloadPath": self.download_path,
+        }
+
+    @classmethod
+    def from_api_response(cls, data: Dict[str, Any]) -> "BackupAttachment":
+        """Parse from Confluence API attachment response."""
+        extensions = data.get("extensions", {})
+        return cls(
+            id=data["id"],
+            title=data.get("title", ""),
+            file_name=data.get("title", ""),
+            media_type=extensions.get("mediaType", "application/octet-stream"),
+            file_size=extensions.get("fileSize", 0),
+            download_path=data.get("_links", {}).get("download", ""),
         )
 
+
+@dataclass
+class BackupPage:
+    """Represents a backed-up Confluence page in storage format."""
+
+    id: str
+    title: str
+    space_key: str
+    storage_body: str  # XHTML storage format — the restorable content
+    version_number: int
+    parent_id: Optional[str] = None
+    ancestors: List[str] = field(default_factory=list)
+    attachments: List[BackupAttachment] = field(default_factory=list)
+    labels: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for JSON export."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "spaceKey": self.space_key,
+            "storageBody": self.storage_body,
+            "versionNumber": self.version_number,
+            "parentId": self.parent_id,
+            "ancestors": self.ancestors,
+            "attachments": [a.to_dict() for a in self.attachments],
+            "labels": self.labels,
+        }
+
+    @classmethod
+    def from_api_response(
+        cls, data: Dict[str, Any], space_key: str
+    ) -> "BackupPage":
+        """Parse from Confluence API page response (with body.storage expanded)."""
+        body = data.get("body", {}).get("storage", {}).get("value", "")
+        version = data.get("version", {}).get("number", 1)
+        ancestors = data.get("ancestors", [])
+        ancestor_ids = [a["id"] for a in ancestors] if ancestors else []
+        parent_id = ancestor_ids[-1] if ancestor_ids else None
+
+        # Labels if expanded
+        labels_data = data.get("metadata", {}).get("labels", {}).get("results", [])
+        labels = [lbl.get("name", "") for lbl in labels_data]
+
+        return cls(
+            id=data["id"],
+            title=data.get("title", ""),
+            space_key=space_key,
+            storage_body=body,
+            version_number=version,
+            parent_id=parent_id,
+            ancestors=ancestor_ids,
+            labels=labels,
+        )
+
+
+@dataclass
+class SpaceBackupResult:
+    """Result of backing up a single Confluence space."""
+
+    space_key: str
+    space_name: str
+    total_pages: int
+    total_attachments: int
+    backup_path: str  # Path to the backup directory or ZIP
+    timestamp: datetime = field(default_factory=datetime.now)
+    errors: List[str] = field(default_factory=list)
+
     @property
-    def progress_percent(self) -> Optional[float]:
-        """Fraction of objects processed (0.0 to 1.0), or None if unavailable."""
-        if self.statistics and self.statistics.total_objects_count > 0:
-            return (
-                self.statistics.processed_objects_count
-                / self.statistics.total_objects_count
-            )
-        return None
+    def has_errors(self) -> bool:
+        """Whether any errors occurred during backup."""
+        return len(self.errors) > 0
 
-
-def _parse_timestamp(value, field_name: str) -> Optional[datetime]:
-    """Parse an ISO 8601 timestamp string into a datetime object.
-
-    Args:
-        value: The raw value from the API response (str, None, or absent).
-        field_name: Name of the field, used in error messages.
-
-    Returns:
-        A datetime object, or None if the value is None/absent.
-
-    Raises:
-        ValueError: If the value is a non-null string that cannot be parsed
-            as ISO 8601.
-    """
-    if value is None:
-        return None
-
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (ValueError, AttributeError) as e:
-        raise ValueError(
-            f"Failed to parse timestamp for field '{field_name}': {value!r}"
-        ) from e
-
-
-def _parse_statistics(data: Optional[dict]) -> Optional[ConfluenceStatistics]:
-    """Parse a nested statistics object from the API response.
-
-    Args:
-        data: The statistics dict from the API, or None.
-
-    Returns:
-        A ConfluenceStatistics instance, or None if data is None.
-    """
-    if data is None:
-        return None
-
-    return ConfluenceStatistics(
-        total_objects_count=data.get("totalObjectsCount", 0),
-        processed_objects_count=data.get("processedObjectsCount", 0),
-        persisted_objects_count=data.get("persistedObjectsCount", 0),
-        skipped_objects_count=data.get("skippedObjectsCount", 0),
-        reused_objects_count=data.get("reusedObjectsCount", 0),
-    )
-
-
-def parse_job_details(data: dict) -> ConfluenceJobDetails:
-    """Parse an API JSON response into a ConfluenceJobDetails dataclass.
-
-    Handles:
-    - Enum conversion from string values
-    - ISO 8601 timestamp parsing (None for absent/null fields)
-    - Nested Statistics object parsing
-    - spaceKeys list extraction (default empty list)
-
-    Args:
-        data: Dictionary from the Confluence API JSON response.
-
-    Returns:
-        A fully populated ConfluenceJobDetails instance.
-
-    Raises:
-        ValueError: If timestamp fields contain invalid ISO 8601 strings,
-            indicating which field failed to parse.
-        KeyError: If required fields (id, jobOperation, jobScope, jobState)
-            are missing.
-    """
-    return ConfluenceJobDetails(
-        id=data["id"],
-        job_operation=ConfluenceJobOperation(data["jobOperation"]),
-        job_scope=ConfluenceJobScope(data["jobScope"]),
-        job_state=ConfluenceJobState(data["jobState"]),
-        create_time=_parse_timestamp(data.get("createTime"), "createTime"),
-        start_processing_time=_parse_timestamp(
-            data.get("startProcessingTime"), "startProcessingTime"
-        ),
-        finish_processing_time=_parse_timestamp(
-            data.get("finishProcessingTime"), "finishProcessingTime"
-        ),
-        cancel_time=_parse_timestamp(data.get("cancelTime"), "cancelTime"),
-        error_message=data.get("errorMessage"),
-        owner=data.get("owner"),
-        cancelled_by=data.get("cancelledBy"),
-        file_name=data.get("fileName"),
-        space_keys=data.get("spaceKeys", []),
-        file_delete_time=_parse_timestamp(
-            data.get("fileDeleteTime"), "fileDeleteTime"
-        ),
-        file_exists=data.get("fileExists", True),
-        statistics=_parse_statistics(data.get("statistics")),
-    )
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for JSON metadata."""
+        return {
+            "spaceKey": self.space_key,
+            "spaceName": self.space_name,
+            "totalPages": self.total_pages,
+            "totalAttachments": self.total_attachments,
+            "backupPath": self.backup_path,
+            "timestamp": self.timestamp.isoformat(),
+            "errors": self.errors,
+        }

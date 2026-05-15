@@ -11,7 +11,7 @@ automate-jira/
 │   ├── services/               # External API clients
 │   │   ├── jira_client.py
 │   │   ├── worklog_service.py
-│   │   ├── backup_service.py
+│   │   ├── jira_backup_service.py
 │   │   ├── confluence_client.py
 │   │   └── confluence_backup_service.py
 │   ├── processors/             # Data transformation

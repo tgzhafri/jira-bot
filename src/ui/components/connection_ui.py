@@ -5,7 +5,7 @@ import streamlit as st
 from ...config import Config, AtlassianConfig
 from ...services.jira_client import JiraClient, JiraClientError
 from ...services.confluence_client import (
-    ConfluenceClient,
+    ConfluenceCloudClient,
     ConfluenceAuthenticationError,
     ConfluenceConnectionError,
     ConfluenceClientError,

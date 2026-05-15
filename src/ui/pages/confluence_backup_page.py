@@ -1,60 +1,33 @@
 """
-Confluence Data Center Backup page.
+Confluence Cloud Backup page.
 
-Provides UI controls for creating site/space backups, monitoring job progress,
-downloading completed backups, viewing job history, and cancelling active jobs.
+Provides UI controls for backing up Confluence Cloud spaces by exporting
+pages in storage format (restorable XHTML) along with attachments.
 """
 
 import logging
 import time
-from typing import Optional
+from typing import List
 
-import pandas as pd
 import streamlit as st
 
-from ...config import AtlassianConfig
-from ...models.confluence_models import ConfluenceJobDetails, ConfluenceJobState
+from ..components.backup_download import (
+    run_backup_with_progress,
+    run_multi_backup_with_progress,
+)
+from ..components.connection_ui import get_confluence_config
 from ...services.confluence_backup_service import ConfluenceBackupService
-from ...services.confluence_client import ConfluenceClient, ConfluenceClientError
+from ...services.confluence_client import ConfluenceCloudClient
 
 logger = logging.getLogger(__name__)
 
 
-def _get_confluence_config() -> Optional[AtlassianConfig]:
-    """Get Atlassian configuration from session state or environment variables.
-
-    Returns:
-        AtlassianConfig if configured, None otherwise.
-    """
-    # Try session state first (UI-driven configuration)
-    if st.session_state.get("atlassian_authenticated") and st.session_state.get("atlassian_url"):
-        try:
-            config = AtlassianConfig(
-                url=st.session_state["atlassian_url"],
-                username=st.session_state["atlassian_username"],
-                api_token=st.session_state["atlassian_api_token"],
-            )
-            config.validate()
-            return config
-        except (ValueError, KeyError):
-            pass
-
-    # Try environment variables
-    try:
-        return AtlassianConfig.from_env()
-    except (ValueError, KeyError):
-        pass
-
-    return None
-
-
-def _check_connection(client: ConfluenceClient) -> bool:
+def _check_connection(client: ConfluenceCloudClient) -> bool:
     """Check if the Confluence instance is reachable, with session-state caching."""
     cache_key = "_confluence_conn_status"
     cache_time_key = "_confluence_conn_check_time"
     ttl_seconds = 60
 
-    # Return cached result if still fresh
     if cache_key in st.session_state:
         last_check = st.session_state.get(cache_time_key, 0)
         if time.time() - last_check < ttl_seconds:
@@ -70,297 +43,210 @@ def _check_connection(client: ConfluenceClient) -> bool:
     return result
 
 
-def _render_connection_status(is_reachable: bool) -> None:
-    """Display connection status indicator."""
-    if is_reachable:
-        st.success("✅ Confluence instance is reachable")
-    else:
-        st.warning("⚠️ Confluence instance is unreachable")
+def _fetch_available_spaces(service: ConfluenceBackupService) -> list:
+    """Fetch available spaces with session-state caching.
+
+    Returns:
+        List of space dicts with key and name fields.
+    """
+    cache_key = "_confluence_spaces_list"
+    cache_time_key = "_confluence_spaces_fetch_time"
+    ttl_seconds = 300  # Cache for 5 minutes
+
+    if cache_key in st.session_state:
+        last_fetch = st.session_state.get(cache_time_key, 0)
+        if time.time() - last_fetch < ttl_seconds:
+            return st.session_state[cache_key]
+
+    try:
+        spaces = service.list_spaces()
+        st.session_state[cache_key] = spaces
+        st.session_state[cache_time_key] = time.time()
+        return spaces
+    except Exception as e:
+        logger.error("Failed to fetch spaces: %s", e)
+        return []
 
 
-def _render_site_backup_controls(service: ConfluenceBackupService) -> None:
-    """Render site backup creation controls."""
-    with st.container(border=True):
-        st.subheader("🌐 Site Backup")
-        st.caption("Create a full backup of the entire Confluence instance.")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            skip_attachments = st.toggle(
-                "Skip Attachments",
-                value=False,
-                key="site_skip_attachments",
-                help="Exclude attachments from the backup to reduce size.",
-            )
-        with col2:
-            keep_permanently = st.toggle(
-                "Keep Permanently",
-                value=False,
-                key="site_keep_permanently",
-                help="Retain the backup file indefinitely on the server.",
-            )
-
-        file_name_prefix = st.text_input(
-            "File Name Prefix (optional)",
-            value="",
-            max_chars=100,
-            key="site_file_name_prefix",
-            help="Custom prefix for the backup filename (max 200 chars). Alphanumeric, hyphens, and underscores only.",
-        )
-
-        if st.button("🏗️ Start Site Backup", type="primary", key="start_site_backup"):
-            prefix = file_name_prefix.strip() if file_name_prefix.strip() else None
-            try:
-                job = service.create_site_backup(
-                    skip_attachments=skip_attachments,
-                    keep_permanently=keep_permanently,
-                    file_name_prefix=prefix,
-                )
-                st.session_state["confluence_active_job"] = job
-                st.success(f"Site backup job created: {job.id}")
-                st.rerun()
-            except (ConfluenceClientError, ValueError) as e:
-                st.error(f"Failed to create site backup: {e}")
+_ALL_SPACES_OPTION = "🌐 ALL SPACES"
 
 
-def _render_space_backup_controls(service: ConfluenceBackupService) -> None:
-    """Render space backup creation controls."""
+def _render_space_selector(service: ConfluenceBackupService) -> None:
+    """Render space selection and backup controls."""
     with st.container(border=True):
         st.subheader("📂 Space Backup")
-        st.caption("Create a backup of specific Confluence spaces.")
-
-        space_keys_input = st.text_input(
-            "Space Keys",
-            value="",
-            key="space_keys_input",
-            help="Comma-separated list of space keys to back up (e.g., DEV, HR, DOCS).",
-            placeholder="DEV, HR, DOCS",
+        st.caption(
+            "Export pages in **storage format** (native XHTML) — "
+            "this is the format Confluence uses internally and can be "
+            "restored via the REST API."
         )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            keep_permanently = st.toggle(
-                "Keep Permanently",
-                value=False,
-                key="space_keep_permanently",
-                help="Retain the backup file indefinitely on the server.",
-            )
-        with col2:
-            file_name_prefix = st.text_input(
-                "File Name Prefix (optional)",
-                value="",
-                max_chars=100,
-                key="space_file_name_prefix",
-                help="Custom prefix (max 100 chars). Alphanumeric, hyphens, and underscores only.",
-            )
+        available_spaces = _fetch_available_spaces(service)
 
-        if st.button("🏗️ Start Space Backup", type="primary", key="start_space_backup"):
-            # Parse space keys
-            raw_keys = [k.strip() for k in space_keys_input.split(",") if k.strip()]
-            if not raw_keys:
-                st.error("Please enter at least one space key.")
+        if not available_spaces:
+            st.warning(
+                "⚠️ Could not retrieve spaces from Confluence. "
+                "Check your permissions or try again."
+            )
+            return
+
+        # Build dropdown options: "ALL SPACES" + individual spaces
+        space_options = [_ALL_SPACES_OPTION] + [
+            "{key} — {name}".format(
+                key=space.get("key", ""), name=space.get("name", "")
+            )
+            for space in available_spaces
+        ]
+
+        selected_spaces = st.multiselect(
+            "Select Spaces",
+            options=space_options,
+            default=None,
+            key="confluence_space_selection",
+            help=(
+                "Choose one or more spaces to back up. "
+                "Select 'ALL SPACES' to back up every available space."
+            ),
+        )
+
+        # Options
+        include_attachments = st.toggle(
+            "Include Attachments",
+            value=True,
+            key="confluence_include_attachments",
+            help="Download all file attachments from pages.",
+        )
+
+        # Backup button
+        if st.button(
+            "🏗️ Start Backup", type="primary", key="start_confluence_backup"
+        ):
+            if not selected_spaces:
+                st.error("Please select at least one space.")
                 return
 
-            prefix = file_name_prefix.strip() if file_name_prefix.strip() else None
-            try:
-                job = service.create_space_backup(
-                    space_keys=raw_keys,
-                    keep_permanently=keep_permanently,
-                    file_name_prefix=prefix,
-                )
-                st.session_state["confluence_active_job"] = job
-                st.success(f"Space backup job created: {job.id}")
-                st.rerun()
-            except (ConfluenceClientError, ValueError) as e:
-                st.error(f"Failed to create space backup: {e}")
-
-
-def _render_active_job_progress(service: ConfluenceBackupService) -> None:
-    """Display progress indicator for the active job."""
-    job: Optional[ConfluenceJobDetails] = st.session_state.get("confluence_active_job")
-    if job is None:
-        return
-
-    # Refresh job status
-    try:
-        job = service.get_job_status(job.id)
-        st.session_state["confluence_active_job"] = job
-    except ConfluenceClientError as e:
-        st.error(f"Failed to fetch job status: {e}")
-        return
-
-    with st.container(border=True):
-        st.subheader("⏳ Active Job")
-
-        # State indicator
-        state_label = job.job_state.value
-        scope_label = job.job_scope.value
-
-        if job.job_state == ConfluenceJobState.QUEUED:
-            st.info(f"**State:** {state_label} | **Scope:** {scope_label}")
-        elif job.job_state == ConfluenceJobState.IN_PROGRESS:
-            st.info(f"**State:** {state_label} | **Scope:** {scope_label}")
-            # Progress bar
-            if job.statistics and job.statistics.total_objects_count > 0:
-                progress = job.statistics.processed_objects_count / job.statistics.total_objects_count
-                st.progress(
-                    min(progress, 1.0),
-                    text=f"Processing: {job.statistics.processed_objects_count} / {job.statistics.total_objects_count} objects",
-                )
+            # Resolve selected space keys
+            if _ALL_SPACES_OPTION in selected_spaces:
+                space_keys = [
+                    space.get("key", "") for space in available_spaces
+                ]
             else:
-                st.progress(0.0, text="Processing...")
-        elif job.job_state == ConfluenceJobState.COMPLETED:
-            st.success(f"✅ Job completed! | **Scope:** {scope_label}")
-            if job.file_name:
-                st.info(f"📁 File: {job.file_name}")
-                # Download the backup file
-                try:
-                    import tempfile
-                    from pathlib import Path
+                space_keys = [
+                    option.split(" — ")[0].strip()
+                    for option in selected_spaces
+                ]
 
-                    dest = Path(tempfile.mkdtemp()) / job.file_name
-                    with st.spinner("Downloading backup file from server..."):
-                        service.download_backup(job.id, dest)
+            space_keys = [k for k in space_keys if k]
+            if not space_keys:
+                st.error("No valid space keys resolved.")
+                return
 
-                    with open(dest, "rb") as f:
-                        file_data = f.read()
-
-                    file_size_mb = len(file_data) / (1024 * 1024)
-                    st.caption(f"Size: {file_size_mb:.1f} MB")
-
-                    st.download_button(
-                        label="📥 Download Backup",
-                        data=file_data,
-                        file_name=job.file_name,
-                        mime="application/zip",
-                        use_container_width=True,
-                        type="primary",
-                        key="download_backup",
-                    )
-
-                    # Clean up temp file after offering download
-                    dest.unlink(missing_ok=True)
-                except ConfluenceClientError as e:
-                    st.error(f"Failed to download backup: {e}")
-
-            # Clear active job
-            if st.button("Clear", key="clear_active_job"):
-                st.session_state["confluence_active_job"] = None
-                st.rerun()
-        elif job.job_state == ConfluenceJobState.FAILED:
-            error_msg = job.error_message or "Unknown error"
-            st.error(f"❌ Job failed: {error_msg}")
-            if st.button("Clear", key="clear_failed_job"):
-                st.session_state["confluence_active_job"] = None
-                st.rerun()
-        elif job.job_state == ConfluenceJobState.CANCELLED:
-            st.warning(f"🚫 Job was cancelled by {job.cancelled_by or 'unknown'}")
-            if st.button("Clear", key="clear_cancelled_job"):
-                st.session_state["confluence_active_job"] = None
-                st.rerun()
-
-        # Cancel button for non-terminal jobs
-        if job.job_state in (ConfluenceJobState.QUEUED, ConfluenceJobState.IN_PROGRESS):
-            if st.button("🛑 Cancel Job", key="cancel_active_job"):
-                try:
-                    service.cancel_job(job.id)
-                    st.warning("Job cancellation requested.")
-                    st.rerun()
-                except ConfluenceClientError as e:
-                    st.error(f"Failed to cancel job: {e}")
-
-            # Auto-refresh for in-progress jobs (poll every 5 seconds)
-            time.sleep(5)
-            st.rerun()
+            _run_backup(service, space_keys, include_attachments)
 
 
-def _render_job_history(service: ConfluenceBackupService) -> None:
-    """Display job history table with the 20 most recent jobs."""
-    with st.container(border=True):
-        st.subheader("📋 Job History")
+def _run_backup(
+    service: ConfluenceBackupService,
+    space_keys: List[str],
+    include_attachments: bool,
+) -> None:
+    """Execute the backup using shared progress/download infrastructure."""
+    if len(space_keys) == 1:
+        # Single space — use the simpler single-backup flow
+        space_key = space_keys[0]
 
-        try:
-            jobs = service.list_jobs(limit=20)
-        except ConfluenceClientError as e:
-            st.error(f"Failed to fetch job history: {e}")
-            return
+        def do_backup():
+            return service.create_zip_backup(
+                space_key, include_attachments=include_attachments
+            )
 
-        if not jobs:
-            st.info("No backup jobs found.")
-            return
-
-        # Build table data
-        rows = []
-        for job in jobs:
-            rows.append({
-                "Status": job.job_state.value,
-                "Scope": job.job_scope.value,
-                "Operation": job.job_operation.value,
-                "Created": job.create_time.strftime("%Y-%m-%d %H:%M") if job.create_time else "—",
-                "Filename": job.file_name or "—",
-            })
-
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        # Cancel buttons for active jobs
-        active_jobs = [
-            j for j in jobs
-            if j.job_state in (ConfluenceJobState.QUEUED, ConfluenceJobState.IN_PROGRESS)
+        run_backup_with_progress(
+            backup_fn=do_backup,
+            display_name=space_key,
+            prefix="confluence_backup",
+            key_suffix=space_key,
+        )
+    else:
+        # Multiple spaces — use multi-backup flow with per-item cards
+        backup_items = [
+            (
+                space_key,
+                lambda sk=space_key: service.create_zip_backup(
+                    sk, include_attachments=include_attachments
+                ),
+            )
+            for space_key in space_keys
         ]
-        if active_jobs:
-            st.markdown("**Active Jobs:**")
-            for job in active_jobs:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.text(f"{job.id} ({job.job_state.value} - {job.job_scope.value})")
-                with col2:
-                    if st.button("🛑 Cancel", key=f"cancel_{job.id}"):
-                        try:
-                            service.cancel_job(job.id)
-                            st.success(f"Cancelled job {job.id}")
-                            st.rerun()
-                        except ConfluenceClientError as e:
-                            st.error(f"Failed to cancel: {e}")
+        run_multi_backup_with_progress(
+            backup_items=backup_items,
+            prefix="confluence_backup",
+        )
+
+
+def _render_info_section() -> None:
+    """Render information about the backup format."""
+    with st.expander("ℹ️ About this backup format", expanded=True):
+        st.markdown(
+            """
+**Storage Format (XHTML)** is the native internal representation Confluence
+uses for page content. It preserves:
+
+- All formatting, macros, and structured content
+- Page hierarchy (parent/child relationships)
+- Labels and metadata
+
+**To restore** a page from backup, use the Confluence REST API:
+
+```python
+confluence.create_page(
+    space=space_key,
+    title=page_title,
+    body=storage_body,  # from the backup JSON
+    representation="storage"
+)
+```
+
+**Attachments** are saved as raw files alongside page metadata and can be
+re-uploaded via the API.
+"""
+        )
 
 
 def show() -> None:
     """Render the Confluence Backup page."""
     st.title("📦 Confluence Backup")
-    st.markdown("Create and manage backups of your Confluence Data Center instance.")
+    st.markdown(
+        "Back up Confluence Cloud spaces in **storage format** "
+        "(restorable via REST API)."
+    )
 
     # Check configuration
-    config = _get_confluence_config()
+    config = get_confluence_config()
     if not config:
-        st.warning("⚠️ Confluence is not configured. Please set up your connection in the Settings page.")
+        st.warning(
+            "⚠️ Confluence is not configured. "
+            "Please set up your connection in the Settings page."
+        )
         if st.button("Go to Settings"):
             st.session_state.current_page = "Settings"
             st.rerun()
         return
 
     # Initialize client and service
-    client = ConfluenceClient(config)
+    client = ConfluenceCloudClient(config)
     service = ConfluenceBackupService(client)
 
     # Connection status
     is_reachable = _check_connection(client)
-    _render_connection_status(is_reachable)
+    if is_reachable:
+        st.success("✅ Confluence Cloud is reachable")
+    else:
+        st.warning("⚠️ Cannot reach Confluence Cloud. Check your credentials.")
+        return
 
     st.markdown("---")
-
-    # Active job progress (if any)
-    if st.session_state.get("confluence_active_job"):
-        _render_active_job_progress(service)
-        st.markdown("---")
 
     # Backup controls
-    col_site, col_space = st.columns(2)
-    with col_site:
-        _render_site_backup_controls(service)
-    with col_space:
-        _render_space_backup_controls(service)
+    _render_space_selector(service)
 
-    st.markdown("---")
-
-    # Job history
-    _render_job_history(service)
+    # Info section
+    _render_info_section()

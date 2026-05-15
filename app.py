@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.ui.state_manager import initialize_session_state
-from src.ui.pages import dashboard_page, worklog_page, backup_page, settings_page, confluence_backup_page
+from src.ui.pages import dashboard_page, worklog_page, jira_backup_page, settings_page, confluence_backup_page
 from src.ui.components.connection_ui import display_connection_status
 from streamlit_option_menu import option_menu
 
@@ -79,7 +79,7 @@ def main():
     elif selected == "Manhour Aggregator":
         worklog_page.show()
     elif selected == "Jira Backup":
-        backup_page.show()
+        jira_backup_page.show()
     elif selected == "Confluence Backup":
         confluence_backup_page.show()
 
