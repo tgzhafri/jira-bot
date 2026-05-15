@@ -39,7 +39,7 @@ def main():
         st.title("🤖 Atlassian Bot")
         
         # Define options and icons
-        options = ["Dashboard", "Settings", "Manhour Calculator", "Jira Backup", "Confluence Backup"]
+        options = ["Dashboard", "Settings", "Manhour Aggregator", "Jira Backup", "Confluence Backup"]
         icons = ["speedometer2", "gear", "clock-history", "archive", "cloud-download"]
 
         # Determine default index from session state (set by Quick Action buttons)
@@ -76,7 +76,7 @@ def main():
         settings_page.show()
     elif selected == "Dashboard":
         dashboard_page.show()
-    elif selected == "Manhour Calculator":
+    elif selected == "Manhour Aggregator":
         worklog_page.show()
     elif selected == "Jira Backup":
         backup_page.show()

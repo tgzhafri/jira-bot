@@ -81,12 +81,12 @@ def show():
 
     with c1:
         with st.container(border=True):
-            st.subheader("🕒 Manhour Calculator")
+            st.subheader("🕒 Manhour Aggregator")
             st.caption(
                 "Generate detailed worklog reports and analyze team capacity."
             )
-            if st.button("Open Calculator", use_container_width=True):
-                st.session_state.current_page = "Manhour Calculator"
+            if st.button("Open Aggregator", use_container_width=True):
+                st.session_state.current_page = "Manhour Aggregator"
                 if "nav_menu" in st.session_state:
                     del st.session_state["nav_menu"]
                 st.rerun()
@@ -122,7 +122,7 @@ def show():
         st.markdown("""
         1.  **Connect**: Go to **Settings** and enter your Atlassian URL, Username, and API Token.
         2.  **Dashboard**: Verify your connection and access quick links.
-        3.  **Analyze**: Use the **Manhour Calculator** to generate CSV reports of worklogs.
+        3.  **Analyze**: Use the **Manhour Aggregator** to generate CSV reports of worklogs.
         4.  **Backup**: Use **Jira Backup** to export your data for archival purposes.
         5.  **Confluence**: Use **Confluence Backup** to create site or space backups.
         """)

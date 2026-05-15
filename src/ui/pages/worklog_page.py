@@ -84,8 +84,8 @@ def handle_report_generation(config, report_type: str, year: int, max_workers: i
             progress_container.empty()
 
 def show():
-    """Render the Manhour Calculator page"""
-    st.title("🕒 Manhour Calculator")
+    """Render the Manhour Aggregator page"""
+    st.title("🕒 Manhour Aggregator")
     st.markdown("Generate and analyze Jira worklog reports to track team capacity and project hours.")
     
     config = get_current_config()
