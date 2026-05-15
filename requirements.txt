@@ -2,30 +2,15 @@
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# CLI and output
-click>=8.1.0
-rich>=13.0.0
-tqdm>=4.66.0
-
 # Data processing
 pandas>=2.0.0
 
 # Export formats
 openpyxl>=3.1.0
 
-# Caching (optional)
+# Caching
 requests-cache>=1.1.0
 
 # UI dependencies
 streamlit>=1.36.0
 streamlit-option-menu>=0.4.0
-
-# Development dependencies (move to requirements-dev.txt in production)
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-mock>=3.11.0
-responses>=0.23.0
-black>=23.0.0
-flake8>=6.0.0
-mypy>=1.5.0
-isort>=5.12.0

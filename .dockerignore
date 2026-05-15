@@ -1,15 +1,17 @@
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
+# Virtual environments
 venv/
 env/
 ENV/
-.venv
+.venv/
 
-# Testing
+# Testing & coverage
 .pytest_cache/
 .coverage
 htmlcov/
@@ -18,39 +20,35 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+.kiro/
 *.swp
 *.swo
 
-# Cache
+# Cache (mounted at runtime)
 .cache/
-*.cache
 
-# Environment
+# Environment (injected via env_file)
 .env
 .env.local
+.env.*
 
-# Reports
-*.csv
-*.xlsx
+# Reports (mounted at runtime)
 reports/
 
 # Git
 .git/
 .gitignore
 
-# Documentation
+# Documentation (not needed in image)
 docs/
-*.md
-!README.md
 
-# Tests
-tests/
+# Dev containers
+.devcontainer/
 
-# Build
+# Build artifacts
 dist/
 build/
 *.egg-info/
 
 # Misc
 sample_output.csv
-manhour_report_*.csv

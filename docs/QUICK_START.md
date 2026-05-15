@@ -18,7 +18,7 @@ Get API token: https://id.atlassian.com/manage-profile/security/api-tokens
 
 ### Step 2: Run
 ```bash
-make web
+make up
 ```
 
 ### Step 3: Use
@@ -35,10 +35,10 @@ Done! 🎉
 ## Common Commands
 
 ```bash
-make web          # Start web UI
-make web-stop     # Stop web UI
-make web-logs     # View logs
-make web-build    # Rebuild and start
+make up           # Start web UI
+make down         # Stop web UI
+make logs         # View logs
+make build        # Rebuild images
 make help         # See all commands
 ```
 
@@ -62,20 +62,20 @@ ERP,Recruitment,24.0,12.0,8.0
 
 **Container won't start:**
 ```bash
-make web-logs  # Check logs
+make logs  # Check logs
 ```
 
 **Need to rebuild:**
 ```bash
-make web-stop
-make web-build
+make down
+make build
+make up
 ```
 
 **Clear cache:**
 ```bash
 rm -rf .cache/*
-make web-stop
-make web
+make restart
 ```
 
 ## Next Steps

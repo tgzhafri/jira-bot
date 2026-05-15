@@ -43,12 +43,6 @@ setup(
         ],
         "excel": ["openpyxl>=3.1.0"],
         "cache": ["requests-cache>=1.1.0"],
-        "cli": ["click>=8.1.0", "rich>=13.0.0", "tqdm>=4.66.0"],
-    },
-    entry_points={
-        "console_scripts": [
-            "jira-tracker=scripts.generate_report:main",
-        ],
     },
     python_requires=">=3.8",
     classifiers=[

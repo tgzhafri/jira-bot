@@ -28,7 +28,7 @@
 
 ```bash
 # Start web UI with one command
-make web
+make up
 
 # Open browser to http://localhost:8501
 # Click "Generate Report" button → View table → Download CSV
@@ -47,9 +47,12 @@ source venv/bin/activate
 
 # Install
 pip install -e .
+
+# Run
+streamlit run app.py
 ```
 
-### 2. Configuration
+### Configuration
 
 Create `.env` file:
 
@@ -63,16 +66,6 @@ ATLASSIAN_API_TOKEN=your-api-token
 Get your API token: https://id.atlassian.com/manage-profile/security/api-tokens
 
 **Note**: If `JIRA_PROJECT_KEY` is not set or empty, the tool will automatically fetch all accessible projects.
-
-### 3. Generate Report
-
-```bash
-python scripts/generate_report.py
-```
-
-Output: `manhour_report_2025.csv`
-
-**Performance**: First run ~20-30s, subsequent runs ~2s (with cache)
 
 ## Output Format
 
@@ -116,46 +109,23 @@ John Doe,Development,ERP,HR,2.0,1.5,1.5,...,0.0,40.0
 - **Week calculation**: Based on day of month (1-7=W1, 8-14=W2, etc.)
 - **Separate sections** for Development and Maintenance
 
-See [docs/FEATURES.md](docs/FEATURES.md) for detailed feature documentation.
-
 ## Usage
 
-### CLI Options
+### Web UI
 
-```bash
-# Generate yearly overview report (default)
-python scripts/generate_report.py
+The Streamlit web interface provides:
 
-# Generate quarterly breakdown report
-python scripts/generate_report.py --quarterly
-
-# Generate monthly breakdown report (one sheet per team member)
-python scripts/generate_report.py --monthly
-
-# Generate weekly breakdown report (weeks within each month)
-python scripts/generate_report.py --weekly
-
-# Generate report for specific year
-python scripts/generate_report.py --year 2024
-
-# Combine options
-python scripts/generate_report.py --weekly --year 2024
-
-# Clear cache (force fresh data)
-python scripts/clear_cache.py
-```
-
-The script will:
-- Fetch all accessible projects (or only specified ones if JIRA_PROJECT_KEY is set)
-- Collect worklogs from all team members using parallel processing
-- Generate CSV and XLSX reports (for breakdown reports)
-- Cache responses for faster subsequent runs
+- **Dashboard** — Connection status and quick overview
+- **Manhour Aggregator** — Generate and preview reports with filters
+- **Jira Backup** — Export project data to ZIP archives
+- **Confluence Backup** — Export Confluence spaces
+- **Settings** — Configure Jira connection credentials
 
 ### As Library
 
 ```python
 from src.config import Config
-from src.jira_client import JiraClient
+from src.services.jira_client import JiraClient
 from src.exporters import TeamOverviewExporter
 from pathlib import Path
 
@@ -175,21 +145,18 @@ exporter.export_yearly(report)
 
 ```
 automate-jira/
-├── app.py                 # Web UI entry point
+├── app.py                 # Web UI entry point (Streamlit)
 ├── src/                   # Core business logic
 │   ├── config.py          # Configuration
-│   ├── jira_client.py     # API client
-│   ├── models.py          # Data models
+│   ├── models/            # Data models
+│   ├── services/          # API clients
 │   ├── processors/        # Business logic
 │   ├── exporters/         # Export formats
+│   ├── ui/                # Streamlit pages & components
 │   └── utils/             # Utilities
-├── scripts/               # CLI scripts
-│   ├── generate_report.py
-│   └── clear_cache.py
 ├── tests/                 # Test suite
 ├── docs/                  # Documentation
-├── Dockerfile             # CLI container
-├── Dockerfile.streamlit   # Web UI container
+├── Dockerfile             # Multi-stage container build
 └── Makefile               # Docker commands
 ```
 
@@ -210,10 +177,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 | `JIRA_MAX_WORKERS` | Parallel workers | `8` | No (default: 8) |
 
 *Required for Jira Cloud Basic Authentication with API tokens
-
-### Performance Tuning
-
-See [PERFORMANCE.md](PERFORMANCE.md) for detailed optimization guide.
 
 ## Testing
 
@@ -249,7 +212,6 @@ pytest tests/test_config.py -v
 - Check project keys are correct
 - Ensure date range covers your work
 
-
 ## License
 
 MIT License - see LICENSE file
@@ -258,7 +220,6 @@ MIT License - see LICENSE file
 
 - **Issues**: GitHub Issues
 - **Docs**: Check project documentation
-- **Email**: support@company.com
 
 ---
 

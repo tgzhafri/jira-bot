@@ -1,32 +1,43 @@
-# Architecture - Automate Jira
+# Architecture — Atlassian Bot
 
 ## Project Structure
 
 ```
 automate-jira/
 ├── app.py                      # Streamlit web UI (entry point)
-├── scripts/
-│   ├── generate_report.py      # CLI report generation
-│   └── clear_cache.py          # Cache management
 ├── src/                        # Core business logic
 │   ├── config.py               # Configuration management
-│   ├── jira_client.py          # Jira API client
-│   ├── models.py               # Data models
-│   ├── processors/             # Business logic
+│   ├── models/                 # Domain models (dataclasses, enums)
+│   ├── services/               # External API clients
+│   │   ├── jira_client.py
+│   │   ├── worklog_service.py
+│   │   ├── backup_service.py
+│   │   ├── confluence_client.py
+│   │   └── confluence_backup_service.py
+│   ├── processors/             # Data transformation
 │   │   └── worklog_processor.py
-│   ├── exporters/              # Export formats
-│   │   └── csv_exporter.py
-│   └── utils/                  # Utilities
+│   ├── exporters/              # Report output formats
+│   │   ├── base_exporter.py
+│   │   ├── yearly_overview_exporter.py
+│   │   ├── quarterly_breakdown_exporter.py
+│   │   ├── monthly_breakdown_exporter.py
+│   │   └── weekly_breakdown_exporter.py
+│   ├── ui/                     # Streamlit UI layer
+│   │   ├── state_manager.py
+│   │   ├── formatters.py
+│   │   ├── report_view.py
+│   │   ├── components/
+│   │   └── pages/
+│   └── utils/                  # Cross-cutting utilities
 │       ├── date_utils.py
-│       └── logging_utils.py
+│       └── logging_config.py
 ├── tests/                      # Test suite
 ├── docs/                       # Documentation
 ├── reports/                    # Generated reports (gitignored)
 ├── .cache/                     # API cache (gitignored)
-├── Dockerfile                  # CLI container
-├── Dockerfile.streamlit        # Web UI container
-├── docker-compose.yml          # CLI orchestration
-├── docker-compose.streamlit.yml # Web UI orchestration
+├── Dockerfile                  # Multi-stage container build
+├── docker-compose.yml          # Service orchestration
+├── docker-compose.override.yml # Dev overrides (live reload)
 └── Makefile                    # Convenience commands
 ```
 
@@ -35,57 +46,35 @@ automate-jira/
 ### 1. app.py Location (Root Level)
 
 **Why at root:**
-- Entry point for Streamlit - conventional location
-- Thin UI layer - doesn't contain business logic
+- Entry point for Streamlit — conventional location
+- Thin UI shell — all business logic lives in `src/`
 - Easy to find and run: `streamlit run app.py`
 - Dockerfile references it directly
-- Separation of concerns: UI vs business logic
 
 **Why NOT in src/:**
-- src/ is for reusable business logic
-- app.py is application-specific, not a library
+- `src/` is for reusable business logic
+- `app.py` is application-specific, not a library
 - Would complicate imports and Docker setup
 
-### 2. Monolithic vs Modular app.py
+### 2. Web-Only Interface
 
-**Current approach: Monolithic with helper functions**
-
-**Rationale:**
-- Simple UI with ~250 lines - manageable size
-- Helper functions provide structure without over-engineering
-- Business logic already separated in `scripts/` and `src/`
-- Easy to understand for contributors
-- No need for complex UI framework
-
-**If it grows beyond 500 lines, consider:**
-```
-src/ui/
-├── __init__.py
-├── components.py      # Reusable UI components
-├── config_panel.py    # Sidebar configuration
-└── report_display.py  # Report preview logic
-```
+The application is accessed exclusively through the Streamlit web UI. This simplifies deployment (single container, single entry point) and provides a richer experience with interactive filters, table previews, and direct downloads.
 
 ### 3. Separation of Concerns
 
-**Layer 1: UI (app.py)**
+**Layer 1: UI (`app.py` + `src/ui/`)**
 - Streamlit interface
 - User input handling
 - Display logic
-- Thin wrapper around business logic
+- Page routing
 
-**Layer 2: Application Logic (scripts/)**
-- CLI entry points
-- Report generation orchestration
-- High-level workflows
+**Layer 2: Business Logic (`src/`)**
+- Services: API communication and caching
+- Processors: Data aggregation and transformation
+- Exporters: Report formatting and file output
+- Models: Domain types
 
-**Layer 3: Business Logic (src/)**
-- Jira API client
-- Data processing
-- Export formats
-- Reusable components
-
-**Layer 4: Infrastructure (Docker, Makefile)**
+**Layer 3: Infrastructure (Docker, Makefile)**
 - Containerization
 - Deployment
 - Development tools
@@ -93,69 +82,60 @@ src/ui/
 ## Data Flow
 
 ```
-User Input (app.py)
+User Input (app.py → src/ui/pages/)
     ↓
 Configuration (src/config.py)
     ↓
-Report Generation (scripts/generate_report.py)
-    ↓
-Jira Client (src/jira_client.py)
+Services (src/services/jira_client.py, worklog_service.py)
     ↓
 API Requests → Cache → Response
     ↓
-Worklog Processor (src/processors/)
+Processors (src/processors/worklog_processor.py)
     ↓
-CSV Exporter (src/exporters/)
+Exporters (src/exporters/*_exporter.py)
     ↓
-File Output → Display (app.py)
+File Output (reports/) → Display in UI
 ```
 
 ## Key Components
 
 ### app.py
-**Purpose:** Web UI entry point
+**Purpose:** Web UI entry point (thin shell)
 **Responsibilities:**
 - Streamlit page configuration
+- Sidebar navigation
+- Page routing
+- Global footer
+
+### src/ui/pages/
+**Purpose:** Individual page modules
+**Responsibilities:**
 - User input collection
 - Progress indication
 - Report preview display
 - Download functionality
 
-**Functions:**
-- `main()` - Application entry point
-- `show_config_error()` - Error display
-- `calculate_summary_stats()` - Metrics calculation
-- `display_report_preview()` - Table rendering
-
-### scripts/generate_report.py
-**Purpose:** Report generation orchestration
-**Responsibilities:**
-- CLI interface
-- Parallel data fetching
-- Progress logging
-- Report aggregation
-
-### src/jira_client.py
-**Purpose:** Jira API abstraction
+### src/services/
+**Purpose:** External API abstraction
 **Responsibilities:**
 - Authentication
-- API requests
-- Response caching
+- API requests with caching
+- Parallel data fetching
 - Error handling
 
-### src/processors/worklog_processor.py
-**Purpose:** Business logic
+### src/processors/
+**Purpose:** Data transformation
 **Responsibilities:**
-- Worklog parsing
-- Time aggregation
-- Data transformation
+- Worklog parsing and aggregation
+- Time period calculations
+- Work type classification
 
-### src/exporters/csv_exporter.py
-**Purpose:** Output formatting
+### src/exporters/
+**Purpose:** Report output
 **Responsibilities:**
-- CSV generation
-- File writing
-- Format validation
+- CSV/XLSX generation
+- Multi-level headers
+- Metadata headers with timestamps
 
 ## Performance Optimizations
 
@@ -164,13 +144,13 @@ File Output → Display (app.py)
    - Configurable worker count (default: 8)
 
 2. **Smart Caching**
-   - requests-cache for API responses
+   - requests-cache for transparent API response caching
    - Persistent cache directory
    - Configurable enable/disable
 
 3. **Efficient Data Structures**
    - Pandas for data manipulation
-   - Type hints for optimization
+   - Dataclasses for domain models
    - Minimal memory footprint
 
 ## Testing Strategy
@@ -182,38 +162,24 @@ tests/
 ├── test_processors.py      # Business logic tests
 ├── test_exporters.py       # Export format tests
 ├── test_integration.py     # End-to-end tests
-├── test_setup.py           # Setup verification
 └── test_benchmark.py       # Performance tests
 ```
 
-## Deployment Options
+## Deployment
 
-### 1. Docker (Recommended)
-- Consistent environment
-- Easy deployment
-- Isolated dependencies
+Single Docker container running Streamlit:
 
-### 2. Local Python
-- Development
-- Quick testing
-- Custom environments
+```bash
+make up    # → http://localhost:8501
+```
 
-### 3. Cloud Platforms
-- Render/Railway (free tier)
-- AWS ECS/Fargate
-- Google Cloud Run
-- Kubernetes
+For production, remove `docker-compose.override.yml` (disables source mounts) and deploy the image to any container platform (ECS, Cloud Run, Render, etc.).
 
 ## Future Considerations
 
-### If app.py grows large:
-1. Extract UI components to `src/ui/`
-2. Create page modules for multi-page app
-3. Add state management layer
-
 ### If adding more features:
 1. Plugin architecture for exporters
-2. Multiple report types
+2. Additional report types (subclass `BaseExporter`)
 3. Scheduled report generation
 4. Email delivery
 
@@ -225,14 +191,13 @@ tests/
 
 ## Best Practices
 
-1. **Keep app.py thin** - UI logic only
-2. **Business logic in src/** - Reusable and testable
-3. **Scripts for workflows** - High-level orchestration
-4. **Type hints everywhere** - Better IDE support and validation
-5. **Comprehensive tests** - Confidence in changes
-6. **Docker-first** - Consistent deployments
+1. **Keep app.py thin** — routing only, no business logic
+2. **Business logic in src/** — reusable and testable
+3. **Type hints everywhere** — better IDE support and validation
+4. **Comprehensive tests** — confidence in changes
+5. **Docker-first** — consistent deployments
 
 ---
 
-**Last Updated:** 2025-11-13
+**Last Updated:** 2026-05-15
 **Version:** 2.1.0

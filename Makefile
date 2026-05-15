@@ -1,58 +1,46 @@
-.PHONY: help build run stop clean logs shell test web web-build web-stop
+.PHONY: help build up down logs restart shell test lint clean
 
 help: ## Show this help message
-	@echo "Automate Jira - Docker Commands"
+	@echo "Atlassian Bot — Docker Commands"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
 
-# CLI Commands
+# ---------------------------------------------------------------------------
+# Core lifecycle
+# ---------------------------------------------------------------------------
 build: ## Build the Docker image
-	docker build -t automate-jira:latest .
+	docker compose build
 
-run: ## Run report generation in container
-	docker compose up
+up: ## Start the web UI (detached)
+	docker compose up -d
+	@echo ""
+	@echo "🚀 Streamlit app running at http://localhost:8501"
+	@echo ""
 
-stop: ## Stop running containers
+down: ## Stop all running services
 	docker compose down
 
-logs: ## View container logs
-	docker compose logs -f
+restart: ## Restart the web UI
+	docker compose restart web
 
-shell: ## Open shell in container
-	docker run -it --rm --env-file .env -v $(PWD)/reports:/app/reports automate-jira:latest /bin/bash
+logs: ## Tail web UI logs
+	docker compose logs -f web
 
-# Web UI Commands
-web: ## Start Streamlit web UI
-	docker compose -f docker-compose.streamlit.yml up -d
-	@echo ""
-	@echo "🚀 Streamlit app running at http://localhost:8501"
-	@echo ""
+# ---------------------------------------------------------------------------
+# Development helpers
+# ---------------------------------------------------------------------------
+shell: ## Open a bash shell in the web container
+	docker compose exec web /bin/bash
 
-web-build: ## Build and start Streamlit web UI
-	docker compose -f docker-compose.streamlit.yml up -d --build
-	@echo ""
-	@echo "🚀 Streamlit app running at http://localhost:8501"
-	@echo ""
+test: ## Run pytest inside a container
+	docker compose exec web python -m pytest
 
-web-stop: ## Stop Streamlit web UI
-	docker compose -f docker-compose.streamlit.yml down
+lint: ## Run linters inside a container
+	docker compose exec web python -m flake8 src/
 
-web-logs: ## View Streamlit logs
-	docker compose -f docker-compose.streamlit.yml logs -f
-
-# Utility Commands
-clean: ## Remove containers, images, and generated files
-	docker compose down -v
-	docker compose -f docker-compose.streamlit.yml down -v
-	docker rmi automate-jira:latest || true
-	rm -rf reports/*.csv .cache/*
-
-test: ## Run tests in container
-	docker run --rm -v $(PWD):/app automate-jira:latest pytest
-
-reports-dir: ## Create reports directory
-	mkdir -p reports
-
-# Quick start
-quick-start: build reports-dir ## Build and run CLI version
-	docker compose up
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+clean: ## Remove containers, images, volumes, and generated files
+	docker compose down -v --rmi local
+	rm -rf reports/*.csv reports/*.xlsx .cache/*
