@@ -17,48 +17,45 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _get_atlassian_env(new_key: str, old_key: str, default: str = "") -> str:
-    """Get an environment variable with fallback to deprecated name.
-
-    Prefers the new ATLASSIAN_* key. Falls back to the legacy JIRA_* key
-    and logs a deprecation warning if the old key is used.
-    """
-    value = os.getenv(new_key)
-    if value:
-        return value
-
-    legacy_value = os.getenv(old_key)
-    if legacy_value:
-        logger.warning(
-            f"Environment variable '{old_key}' is deprecated. "
-            f"Please rename it to '{new_key}'."
-        )
-        return legacy_value
-
-    return default
+def _get_env(key: str, default: str = "") -> str:
+    """Get an environment variable or return a default."""
+    return os.getenv(key, default)
 
 
 @dataclass
 class AtlassianConfig:
-    """Shared Atlassian Cloud connection configuration.
+    """Atlassian Cloud connection and operational configuration.
 
     Used by both Jira and Confluence clients since they share the same
     authentication credentials (email + API token against the same instance).
+
+    Also holds operational settings (caching, parallelism, project filtering)
+    that apply to report generation and data fetching.
     """
     url: str
     username: str  # Email address for Basic Auth
     api_token: str
+    project_keys: Optional[List[str]] = None  # None means fetch all projects
+    enable_cache: bool = True
+    cache_dir: str = ".cache"
+    max_workers: int = 8  # For parallel processing
 
     @classmethod
     def from_env(cls) -> "AtlassianConfig":
-        """Load configuration from environment variables.
+        """Load configuration from ATLASSIAN_* environment variables."""
+        url = _get_env('ATLASSIAN_URL').strip()
+        username = _get_env('ATLASSIAN_USERNAME').strip()
+        api_token = _get_env('ATLASSIAN_API_TOKEN').strip()
 
-        Supports both new ATLASSIAN_* and legacy JIRA_* env var names.
-        Legacy names trigger a deprecation warning in the logs.
-        """
-        url = _get_atlassian_env('ATLASSIAN_URL', 'JIRA_URL').strip()
-        username = _get_atlassian_env('ATLASSIAN_USERNAME', 'JIRA_USERNAME').strip()
-        api_token = _get_atlassian_env('ATLASSIAN_API_TOKEN', 'JIRA_API_TOKEN').strip()
+        # Project filtering
+        project_keys_str = _get_env('ATLASSIAN_PROJECT_KEYS').strip()
+        project_keys = None
+        if project_keys_str:
+            project_keys = [
+                key.strip() for key in project_keys_str.split(',') if key.strip()
+            ]
+            if not project_keys:
+                project_keys = None
 
         if not url:
             raise ValueError("Missing required environment variable: ATLASSIAN_URL")
@@ -69,7 +66,12 @@ class AtlassianConfig:
         if not url.startswith(('http://', 'https://')):
             raise ValueError("Invalid ATLASSIAN_URL format: must start with http:// or https://")
 
-        return cls(url=url.rstrip('/'), username=username, api_token=api_token)
+        return cls(
+            url=url.rstrip('/'),
+            username=username,
+            api_token=api_token,
+            project_keys=project_keys,
+        )
 
     @classmethod
     def from_dict(cls, data: dict) -> "AtlassianConfig":
@@ -78,6 +80,10 @@ class AtlassianConfig:
             url=data.get('url', '').rstrip('/'),
             username=data.get('username', ''),
             api_token=data.get('api_token', ''),
+            project_keys=data.get('project_keys'),
+            enable_cache=data.get('enable_cache', True),
+            cache_dir=data.get('cache_dir', '.cache'),
+            max_workers=data.get('max_workers', 8),
         )
 
     def validate(self) -> bool:
@@ -95,71 +101,9 @@ class AtlassianConfig:
         return True
 
 
-# Backward-compatible alias — existing code importing ConfluenceConfig still works
+# Backward-compatible aliases
+JiraConfig = AtlassianConfig
 ConfluenceConfig = AtlassianConfig
-
-
-@dataclass
-class JiraConfig(AtlassianConfig):
-    """Jira-specific connection configuration.
-
-    Extends AtlassianConfig with Jira-specific settings like project keys,
-    caching, and parallelism.
-
-    Note: username (email) is required for Jira Cloud Basic Authentication.
-    Reference: https://developer.atlassian.com/cloud/jira/platform/basic-auth-for-rest-apis/
-    """
-    project_keys: Optional[List[str]] = None  # None means fetch all projects
-    enable_cache: bool = True
-    cache_dir: str = ".cache"
-    max_workers: int = 8  # For parallel processing
-
-    @classmethod
-    def from_env(cls) -> "JiraConfig":
-        """Load configuration from environment variables.
-
-        Supports both new ATLASSIAN_* and legacy JIRA_* env var names.
-        Legacy names trigger a deprecation warning in the logs.
-        """
-        url = _get_atlassian_env('ATLASSIAN_URL', 'JIRA_URL')
-        username = _get_atlassian_env('ATLASSIAN_USERNAME', 'JIRA_USERNAME')
-        api_token = _get_atlassian_env('ATLASSIAN_API_TOKEN', 'JIRA_API_TOKEN')
-        project_keys_str = os.getenv('JIRA_PROJECT_KEY', '')
-
-        # If JIRA_PROJECT_KEY is empty or not set, project_keys will be None (fetch all)
-        project_keys = None
-        if project_keys_str:
-            project_keys = [key.strip() for key in project_keys_str.split(',') if key.strip()]
-            if not project_keys:
-                project_keys = None  # Empty after parsing means fetch all
-
-        # Performance settings
-        enable_cache = os.getenv('JIRA_ENABLE_CACHE', 'true').lower() in ('true', '1', 'yes')
-        cache_dir = os.getenv('JIRA_CACHE_DIR', '.cache')
-        max_workers = int(os.getenv('JIRA_MAX_WORKERS', '8'))
-
-        return cls(
-            url=(url or "").rstrip('/'),
-            username=username or "",
-            api_token=api_token or "",
-            project_keys=project_keys,
-            enable_cache=enable_cache,
-            cache_dir=cache_dir,
-            max_workers=max_workers,
-        )
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "JiraConfig":
-        """Load configuration from a dictionary"""
-        return cls(
-            url=data.get('url', '').rstrip('/'),
-            username=data.get('username', ''),
-            api_token=data.get('api_token', ''),
-            project_keys=data.get('project_keys'),
-            enable_cache=data.get('enable_cache', True),
-            cache_dir=data.get('cache_dir', '.cache'),
-            max_workers=data.get('max_workers', 8),
-        )
 
 
 @dataclass
@@ -207,18 +151,14 @@ class Config:
 
     def __init__(
         self,
-        jira: Optional[JiraConfig] = None,
+        jira: Optional[AtlassianConfig] = None,
         atlassian: Optional[AtlassianConfig] = None,
         report: Optional[ReportConfig] = None,
         export: Optional[ExportConfig] = None,
     ):
-        self.jira = jira or JiraConfig.from_env()
-        # Shared Atlassian credentials — defaults to the Jira config's base fields
-        self.atlassian = atlassian or AtlassianConfig(
-            url=self.jira.url,
-            username=self.jira.username,
-            api_token=self.jira.api_token,
-        )
+        self.jira = jira or AtlassianConfig.from_env()
+        # Shared Atlassian credentials — same instance as jira config
+        self.atlassian = atlassian or self.jira
         self.report = report or ReportConfig.default()
         self.export = export or ExportConfig()
 
@@ -226,7 +166,7 @@ class Config:
     def from_env(cls) -> "Config":
         """Load all configuration from environment"""
         return cls(
-            jira=JiraConfig.from_env(),
+            jira=AtlassianConfig.from_env(),
             report=ReportConfig.default(),
             export=ExportConfig(),
         )

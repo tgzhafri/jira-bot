@@ -73,35 +73,28 @@ class TestJiraConfig:
         # Should not raise - None is valid (means fetch all)
         assert config.validate() is True
 
-    def test_from_env_falls_back_to_legacy_jira_vars(self, monkeypatch):
-        """Test from_env falls back to JIRA_* env vars when ATLASSIAN_* are missing"""
-        monkeypatch.delenv("ATLASSIAN_URL", raising=False)
-        monkeypatch.delenv("ATLASSIAN_USERNAME", raising=False)
-        monkeypatch.delenv("ATLASSIAN_API_TOKEN", raising=False)
-        monkeypatch.setenv("JIRA_URL", "https://legacy.atlassian.net/")
-        monkeypatch.setenv("JIRA_USERNAME", "legacy@example.com")
-        monkeypatch.setenv("JIRA_API_TOKEN", "legacy-token-123")
+    def test_from_env_loads_atlassian_vars(self, monkeypatch):
+        """Test from_env loads ATLASSIAN_* env vars"""
+        monkeypatch.setenv("ATLASSIAN_URL", "https://test.atlassian.net")
+        monkeypatch.setenv("ATLASSIAN_USERNAME", "user@example.com")
+        monkeypatch.setenv("ATLASSIAN_API_TOKEN", "token-12345678")
 
         config = JiraConfig.from_env()
 
-        assert config.url == "https://legacy.atlassian.net"
-        assert config.username == "legacy@example.com"
-        assert config.api_token == "legacy-token-123"
+        assert config.url == "https://test.atlassian.net"
+        assert config.username == "user@example.com"
+        assert config.api_token == "token-12345678"
 
-    def test_from_env_prefers_atlassian_over_jira_vars(self, monkeypatch):
-        """Test from_env prefers ATLASSIAN_* over JIRA_* when both are set"""
-        monkeypatch.setenv("ATLASSIAN_URL", "https://new.atlassian.net")
-        monkeypatch.setenv("ATLASSIAN_USERNAME", "new@example.com")
-        monkeypatch.setenv("ATLASSIAN_API_TOKEN", "new-token-12345")
-        monkeypatch.setenv("JIRA_URL", "https://old.atlassian.net")
-        monkeypatch.setenv("JIRA_USERNAME", "old@example.com")
-        monkeypatch.setenv("JIRA_API_TOKEN", "old-token-12345")
+    def test_from_env_loads_project_keys(self, monkeypatch):
+        """Test from_env loads project keys"""
+        monkeypatch.setenv("ATLASSIAN_URL", "https://test.atlassian.net")
+        monkeypatch.setenv("ATLASSIAN_USERNAME", "user@example.com")
+        monkeypatch.setenv("ATLASSIAN_API_TOKEN", "token-12345678")
+        monkeypatch.setenv("ATLASSIAN_PROJECT_KEYS", "PROJ1,PROJ2")
 
         config = JiraConfig.from_env()
 
-        assert config.url == "https://new.atlassian.net"
-        assert config.username == "new@example.com"
-        assert config.api_token == "new-token-12345"
+        assert config.project_keys == ["PROJ1", "PROJ2"]
 
 
 class TestReportConfig:
@@ -240,7 +233,6 @@ class TestAtlassianConfig:
     def test_from_env_missing_url(self, monkeypatch):
         """Test from_env raises ValueError when ATLASSIAN_URL is missing"""
         monkeypatch.delenv("ATLASSIAN_URL", raising=False)
-        monkeypatch.delenv("JIRA_URL", raising=False)
         monkeypatch.setenv("ATLASSIAN_USERNAME", "admin@example.com")
         monkeypatch.setenv("ATLASSIAN_API_TOKEN", "token123456")
 
@@ -250,7 +242,6 @@ class TestAtlassianConfig:
     def test_from_env_empty_url(self, monkeypatch):
         """Test from_env raises ValueError when ATLASSIAN_URL is empty"""
         monkeypatch.setenv("ATLASSIAN_URL", "")
-        monkeypatch.delenv("JIRA_URL", raising=False)
         monkeypatch.setenv("ATLASSIAN_USERNAME", "admin@example.com")
         monkeypatch.setenv("ATLASSIAN_API_TOKEN", "token123456")
 
@@ -260,7 +251,6 @@ class TestAtlassianConfig:
     def test_from_env_whitespace_only_url(self, monkeypatch):
         """Test from_env raises ValueError when ATLASSIAN_URL is whitespace only"""
         monkeypatch.setenv("ATLASSIAN_URL", "   ")
-        monkeypatch.delenv("JIRA_URL", raising=False)
         monkeypatch.setenv("ATLASSIAN_USERNAME", "admin@example.com")
         monkeypatch.setenv("ATLASSIAN_API_TOKEN", "token123456")
 
@@ -271,7 +261,6 @@ class TestAtlassianConfig:
         """Test from_env raises ValueError when ATLASSIAN_USERNAME is missing"""
         monkeypatch.setenv("ATLASSIAN_URL", "https://confluence.example.com")
         monkeypatch.delenv("ATLASSIAN_USERNAME", raising=False)
-        monkeypatch.delenv("JIRA_USERNAME", raising=False)
         monkeypatch.setenv("ATLASSIAN_API_TOKEN", "token123456")
 
         with pytest.raises(ValueError, match="ATLASSIAN_USERNAME"):
@@ -282,7 +271,6 @@ class TestAtlassianConfig:
         monkeypatch.setenv("ATLASSIAN_URL", "https://confluence.example.com")
         monkeypatch.setenv("ATLASSIAN_USERNAME", "admin@example.com")
         monkeypatch.delenv("ATLASSIAN_API_TOKEN", raising=False)
-        monkeypatch.delenv("JIRA_API_TOKEN", raising=False)
 
         with pytest.raises(ValueError, match="ATLASSIAN_API_TOKEN"):
             ConfluenceConfig.from_env()
@@ -295,21 +283,6 @@ class TestAtlassianConfig:
 
         with pytest.raises(ValueError, match="must start with http:// or https://"):
             ConfluenceConfig.from_env()
-
-    def test_from_env_falls_back_to_legacy_jira_vars(self, monkeypatch):
-        """Test from_env falls back to JIRA_* env vars when ATLASSIAN_* are missing"""
-        monkeypatch.delenv("ATLASSIAN_URL", raising=False)
-        monkeypatch.delenv("ATLASSIAN_USERNAME", raising=False)
-        monkeypatch.delenv("ATLASSIAN_API_TOKEN", raising=False)
-        monkeypatch.setenv("JIRA_URL", "https://legacy.example.com/")
-        monkeypatch.setenv("JIRA_USERNAME", "legacy@example.com")
-        monkeypatch.setenv("JIRA_API_TOKEN", "legacy-token-123")
-
-        config = ConfluenceConfig.from_env()
-
-        assert config.url == "https://legacy.example.com"
-        assert config.username == "legacy@example.com"
-        assert config.api_token == "legacy-token-123"
 
     def test_from_dict_valid(self):
         """Test from_dict with valid dictionary"""

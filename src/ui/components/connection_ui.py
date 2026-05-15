@@ -2,7 +2,7 @@ import os
 from typing import Optional
 
 import streamlit as st
-from ...config import Config, JiraConfig, AtlassianConfig
+from ...config import Config, AtlassianConfig
 from ...services.jira_client import JiraClient, JiraClientError
 from ...services.confluence_client import (
     ConfluenceClient,
@@ -82,7 +82,7 @@ def render_connection_settings():
             else:
                 try:
                     # Test with Jira first (primary service)
-                    temp_config = JiraConfig(
+                    temp_config = AtlassianConfig(
                         url=url.strip().rstrip("/"),
                         username=username.strip(),
                         api_token=api_token,
@@ -119,21 +119,21 @@ def get_current_config():
     """Get Config object using current session credentials or environment variables"""
     # 1. Try session state (manual override)
     if st.session_state.get("atlassian_authenticated") and st.session_state.atlassian_url:
-        jira_config = JiraConfig(
+        jira_config = AtlassianConfig(
             url=st.session_state.atlassian_url,
             username=st.session_state.atlassian_username,
             api_token=st.session_state.atlassian_api_token,
         )
         return Config(jira=jira_config)
 
-    # 2. Try environment variables (supports both ATLASSIAN_* and legacy JIRA_*)
+    # 2. Try environment variables
     try:
-        url = get_secret("ATLASSIAN_URL") or get_secret("JIRA_URL")
-        user = get_secret("ATLASSIAN_USERNAME") or get_secret("JIRA_USERNAME")
-        token = get_secret("ATLASSIAN_API_TOKEN") or get_secret("JIRA_API_TOKEN")
+        url = get_secret("ATLASSIAN_URL")
+        user = get_secret("ATLASSIAN_USERNAME")
+        token = get_secret("ATLASSIAN_API_TOKEN")
 
         if all([url, user, token]):
-            jira_config = JiraConfig(url=url, username=user, api_token=token)
+            jira_config = AtlassianConfig(url=url, username=user, api_token=token)
             jira_config.validate()
             return Config(jira=jira_config)
     except Exception:

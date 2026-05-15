@@ -11,7 +11,7 @@ import json
 import hashlib
 from pathlib import Path
 
-from ..config import JiraConfig
+from ..config import AtlassianConfig
 from ..models import Issue, Worklog, Component, Author, WorkType
 from ..utils.date_utils import MALAYSIA_TZ
 
@@ -36,7 +36,7 @@ class JiraAPIError(JiraClientError):
 class JiraClient:
     """Client for interacting with Jira API"""
     
-    def __init__(self, config: JiraConfig, enable_cache: bool = True, cache_dir: str = ".cache"):
+    def __init__(self, config: AtlassianConfig, enable_cache: bool = True, cache_dir: str = ".cache"):
         self.config = config
         self.session = requests.Session()
         self.session.auth = HTTPBasicAuth(config.username, config.api_token)

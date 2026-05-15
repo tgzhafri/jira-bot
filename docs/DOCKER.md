@@ -70,9 +70,7 @@ Injected via `env_file: .env` in Compose. See `.env.example` for the full list:
 ATLASSIAN_URL=https://your-company.atlassian.net
 ATLASSIAN_USERNAME=your-email@company.com
 ATLASSIAN_API_TOKEN=your-api-token
-JIRA_PROJECT_KEY=PROJ1,PROJ2   # optional, empty = all projects
-JIRA_ENABLE_CACHE=true
-JIRA_MAX_WORKERS=8
+ATLASSIAN_PROJECT_KEYS=PROJ1,PROJ2   # optional, empty = all projects
 ```
 
 ## Running Without Compose
