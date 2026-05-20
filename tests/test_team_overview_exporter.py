@@ -1,15 +1,8 @@
-#!/usr/bin/env python3
-"""
-Unit tests for YearlyOverviewExporter
-"""
+"""Unit tests for YearlyOverviewExporter."""
 
-import sys
 import pytest
 from pathlib import Path
 from datetime import datetime, timezone
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.exporters import YearlyOverviewExporter
 from src.models import (

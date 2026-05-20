@@ -11,6 +11,11 @@ services:
     volumes:
       - ./reports:/app/reports
       - ./.cache:/app/.cache
+      - ./app.py:/app/app.py
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./pytest.ini:/app/pytest.ini
+      - ./.streamlit:/app/.streamlit:ro
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

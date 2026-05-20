@@ -22,34 +22,17 @@
 
 ## Quick Start
 
-> **New to this?** Check [QUICK_START.md](QUICK_START.md) for a 2-minute setup guide.
-
-### Option 1: Docker (Recommended)
+### Setup
 
 ```bash
-# Start web UI with one command
+# 1. Create .env with your credentials (see below)
+cp .env.example .env
+
+# 2. Start the app
 make up
 
-# Open browser to http://localhost:8501
-# Click "Generate Report" button → View table → Download CSV
-```
-
-See [docs/DOCKER.md](docs/DOCKER.md) for full Docker documentation.
-
-### Option 2: Local Installation
-
-```bash
-# Clone and setup
-git clone <repo-url>
-cd automate-jira
-python3 -m venv venv
-source venv/bin/activate
-
-# Install
-pip install -e .
-
-# Run
-streamlit run app.py
+# 3. Open browser
+open http://localhost:8501
 ```
 
 ### Configuration
@@ -64,8 +47,6 @@ ATLASSIAN_API_TOKEN=your-api-token
 ```
 
 Get your API token: https://id.atlassian.com/manage-profile/security/api-tokens
-
-**Note**: If `ATLASSIAN_PROJECT_KEYS` is not set or empty, the tool will automatically fetch all accessible projects.
 
 ## Output Format
 
@@ -178,17 +159,17 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 ## Testing
 
 ```bash
-# Install test dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
+# Run all tests
+make test
 
 # With coverage
-pytest --cov=src
+make test-cov
 
-# Specific test
-pytest tests/test_config.py -v
+# Lint
+make lint
+
+# Format
+make format
 ```
 
 ## Troubleshooting

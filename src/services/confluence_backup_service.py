@@ -1,26 +1,7 @@
-"""
-Confluence Cloud backup service.
+"""Confluence Cloud backup service.
 
-Exports Confluence spaces by fetching all pages in storage format (XHTML)
-along with their attachments. The storage format is the native representation
-used by Confluence and can be restored via the REST API.
-
-Backup structure per space:
-    backups/confluence/<space_key>_<timestamp>/
-        metadata.json          — space info, page count, timestamp
-        pages/
-            <page_id>.json     — page metadata + storage body
-        attachments/
-            <page_id>/
-                <filename>     — raw attachment files
-
-Performance optimizations:
-    - Generator-based page fetching (memory efficient, no full list in memory)
-    - Parallel page processing with ThreadPoolExecutor
-    - Minimal expansion fields (only fetch what's needed)
-    - Parallel space backup support
-    - Progress checkpointing for long-running backups
-    - Concurrent I/O for writing page JSON and attachment files
+Exports spaces by fetching pages in storage format (XHTML) with attachments.
+Uses generator-based fetching and parallel processing for performance.
 """
 
 import json
@@ -51,19 +32,7 @@ BACKUP_EXPAND_FIELDS = "body.storage,version,ancestors"
 
 
 class ConfluenceBackupService:
-    """Service for backing up Confluence Cloud spaces.
-
-    Fetches all pages in storage format (restorable XHTML) and optionally
-    downloads attachments. Produces a structured directory that can be used
-    to restore content via the Confluence REST API.
-
-    Performance features:
-    - Uses generator-based page fetching (pages processed as they arrive)
-    - Parallel page processing with ThreadPoolExecutor
-    - Minimal API expansion fields
-    - Parallel space backup for multi-space operations
-    - Progress checkpointing
-    """
+    """Backs up Confluence Cloud spaces to structured directories or ZIP archives."""
 
     DEFAULT_OUTPUT_DIR = (
         Path(__file__).resolve().parent.parent.parent / "backups" / "confluence"

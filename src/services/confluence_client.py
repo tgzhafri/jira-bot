@@ -1,16 +1,4 @@
-"""
-Confluence Cloud API client using atlassian-python-api.
-
-Wraps the Confluence class from atlassian-python-api to provide
-page content retrieval, attachment downloads, and space listing
-for backup operations.
-
-Performance features:
-- Retry with exponential backoff on transient failures
-- Minimal expansion fields by default
-- Generator-based page fetching for memory efficiency
-- Pagination with configurable page sizes
-"""
+"""Confluence Cloud API client with retry and pagination support."""
 
 import logging
 import time
@@ -51,11 +39,7 @@ class ConfluenceAPIError(ConfluenceClientError):
 
 
 def _retry_on_transient(func):
-    """Decorator that retries Confluence API calls on transient failures.
-
-    Handles connection errors and server errors with exponential backoff.
-    Does not retry on authentication errors.
-    """
+    """Retry on transient failures with exponential backoff. Does not retry auth errors."""
     def wrapper(*args, **kwargs):
         last_exception = None
         for attempt in range(MAX_RETRIES + 1):
@@ -103,16 +87,7 @@ def _retry_on_transient(func):
 
 
 class ConfluenceCloudClient:
-    """Client for interacting with Confluence Cloud REST API.
-
-    Uses atlassian-python-api under the hood for all API calls.
-    Provides methods needed for page-level backup operations.
-
-    Features:
-    - Automatic retry with exponential backoff
-    - Generator-based page fetching for memory efficiency
-    - Configurable page sizes for pagination
-    """
+    """Client for Confluence Cloud REST API with retry and pagination."""
 
     def __init__(self, config: AtlassianConfig):
         """Initialize the Confluence Cloud client.
@@ -202,26 +177,6 @@ class ConfluenceCloudClient:
                 "Failed to fetch pages from space {}: {}".format(space_key, e)
             ) from e
 
-    def get_all_pages_from_space(
-        self, space_key: str, expand: str = "body.storage,version,ancestors"
-    ) -> List[Dict[str, Any]]:
-        """Get all pages from a space with their storage format body.
-
-        Note: For large spaces, prefer get_all_pages_from_space_generator()
-        to avoid loading all pages into memory.
-
-        Args:
-            space_key: The space key to fetch pages from.
-            expand: Comma-separated list of fields to expand.
-
-        Returns:
-            List of page dicts with full content in storage format.
-
-        Raises:
-            ConfluenceClientError: If the API request fails.
-        """
-        return list(self.get_all_pages_from_space_generator(space_key, expand))
-
     @_retry_on_transient
     def get_page_by_id(
         self, page_id: str, expand: str = "body.storage,version,ancestors"
@@ -247,20 +202,42 @@ class ConfluenceCloudClient:
 
     @_retry_on_transient
     def get_attachments_from_page(self, page_id: str) -> List[Dict[str, Any]]:
-        """Get all attachments metadata for a page.
+        """Get all attachments metadata for a page using the v2 REST API.
+
+        Uses GET /wiki/api/v2/pages/{id}/attachments which returns attachment
+        metadata including a downloadLink for each attachment.
 
         Args:
             page_id: The page ID.
 
         Returns:
-            List of attachment metadata dicts.
+            List of attachment metadata dicts (v2 format with downloadLink).
 
         Raises:
             ConfluenceClientError: If the API request fails.
         """
         try:
-            result = self._confluence.get_attachments_from_content(page_id)
-            return result.get("results", [])
+            attachments = []
+            url = "/api/v2/pages/{}/attachments".format(page_id)
+            while url:
+                response = self._confluence._session.get(
+                    self._confluence.url + url
+                )
+                if response.status_code == 401:
+                    raise ConfluenceAuthenticationError(
+                        "Unauthorized (401) fetching attachments for page {}".format(
+                            page_id
+                        )
+                    )
+                response.raise_for_status()
+                data = response.json()
+                attachments.extend(data.get("results", []))
+                # Handle pagination via _links.next
+                links = data.get("_links", {})
+                url = links.get("next")
+            return attachments
+        except ConfluenceClientError:
+            raise
         except Exception as e:
             raise ConfluenceClientError(
                 "Failed to fetch attachments for page {}: {}".format(page_id, e)
@@ -272,9 +249,11 @@ class ConfluenceCloudClient:
     ) -> Dict[str, bytes]:
         """Download all attachments from a page into memory.
 
-        Uses the official REST API download endpoint per attachment to
-        avoid 401 errors that occur with the library's bulk download
-        method on Confluence Cloud.
+        Uses the Confluence REST API v2 to list attachments and then
+        downloads each one via its downloadLink. The downloadLink is a
+        relative path appended to the wiki base URL.
+
+        See: https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get
 
         Args:
             page_id: The page ID.
@@ -292,126 +271,37 @@ class ConfluenceCloudClient:
 
             result = {}
             for att in attachments:
-                title = att.get("title", "")
-                att_id = att.get("id", "")
-                if not title or not att_id:
-                    continue
-                try:
-                    content = self._download_attachment_by_id(page_id, att_id)
-                    result[title] = content
-                except ConfluenceClientError as e:
+                download_link = att.get("downloadLink")
+                title = att.get("title", "unknown")
+                if not download_link:
                     logger.warning(
-                        "Failed to download attachment '%s' from page %s: %s",
-                        title, page_id, e,
+                        "No downloadLink for attachment '%s' on page %s",
+                        title, page_id,
                     )
+                    continue
+
+                # downloadLink is relative to the wiki base URL
+                download_url = self._confluence.url + download_link
+                response = self._confluence._session.get(download_url)
+                if response.status_code == 401:
+                    raise ConfluenceClientError(
+                        "Unauthorized (401) downloading attachment '{}' "
+                        "for page {}".format(title, page_id)
+                    )
+                response.raise_for_status()
+                result[title] = response.content
+
             return result
         except ConfluenceClientError:
             raise
         except Exception as e:
+            error_msg = str(e)
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                raise ConfluenceClientError(
+                    "Unauthorized (401) downloading attachments for page {}".format(
+                        page_id
+                    )
+                ) from e
             raise ConfluenceClientError(
                 "Failed to download attachments for page {}: {}".format(page_id, e)
-            ) from e
-
-    def _download_attachment_by_id(
-        self, page_id: str, attachment_id: str
-    ) -> bytes:
-        """Download a single attachment using the official REST API endpoint.
-
-        Uses GET /wiki/rest/api/content/{pageId}/child/attachment/{attachmentId}/download
-        which properly handles authentication on Confluence Cloud.
-
-        Args:
-            page_id: The page content ID.
-            attachment_id: The attachment content ID (e.g. 'att12345' or numeric).
-
-        Returns:
-            Raw bytes of the attachment.
-
-        Raises:
-            ConfluenceClientError: If the download fails.
-        """
-        import requests as req
-        from requests.auth import HTTPBasicAuth
-
-        # Build the full download URL using the official v1 REST endpoint
-        base_url = self.config.url.rstrip("/")
-        if not base_url.endswith("/wiki"):
-            base_url = base_url + "/wiki"
-        download_url = (
-            "{base}/rest/api/content/{page_id}/child/attachment"
-            "/{att_id}/download".format(
-                base=base_url, page_id=page_id, att_id=attachment_id
-            )
-        )
-
-        try:
-            response = req.get(
-                download_url,
-                auth=HTTPBasicAuth(self.config.username, self.config.api_token),
-                allow_redirects=True,
-                timeout=60,
-            )
-            if response.status_code == 401:
-                raise ConfluenceClientError(
-                    "Unauthorized (401) downloading attachment {}".format(
-                        attachment_id
-                    )
-                )
-            response.raise_for_status()
-            return response.content
-        except ConfluenceClientError:
-            raise
-        except Exception as e:
-            raise ConfluenceClientError(
-                "Failed to download attachment {}: {}".format(attachment_id, e)
-            ) from e
-
-    @_retry_on_transient
-    def download_attachment(self, download_url: str) -> bytes:
-        """Download a single attachment by its relative download URL path.
-
-        Makes a direct HTTP request with Basic Auth credentials to handle
-        Confluence Cloud attachment downloads that require proper auth headers.
-
-        Args:
-            download_url: The relative download path from attachment metadata
-                (e.g. '/wiki/download/attachments/...').
-
-        Returns:
-            Raw bytes of the attachment.
-
-        Raises:
-            ConfluenceClientError: If the download fails.
-        """
-        import requests as req
-        from requests.auth import HTTPBasicAuth
-
-        # Build full URL from the relative download path
-        base_url = self.config.url.rstrip("/")
-        # download_url typically starts with /wiki/... or /download/...
-        if download_url.startswith("/wiki"):
-            full_url = base_url + download_url
-        elif download_url.startswith("/"):
-            full_url = base_url + "/wiki" + download_url
-        else:
-            full_url = base_url + "/wiki/" + download_url
-
-        try:
-            response = req.get(
-                full_url,
-                auth=HTTPBasicAuth(self.config.username, self.config.api_token),
-                allow_redirects=True,
-                timeout=60,
-            )
-            if response.status_code == 401:
-                raise ConfluenceClientError(
-                    "Unauthorized (401)"
-                )
-            response.raise_for_status()
-            return response.content
-        except ConfluenceClientError:
-            raise
-        except Exception as e:
-            raise ConfluenceClientError(
-                "Failed to download attachment: {}".format(e)
             ) from e

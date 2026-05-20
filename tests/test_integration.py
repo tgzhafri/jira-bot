@@ -1,14 +1,7 @@
-#!/usr/bin/env python3
-"""
-Integration test for Automate Jira
-"""
+"""Integration tests for Automate Jira."""
 
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_imports():
     """Test all imports work"""

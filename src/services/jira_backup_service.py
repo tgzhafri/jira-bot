@@ -1,14 +1,5 @@
-"""
-Jira project backup service.
+"""Jira project backup service with parallel processing and streaming ZIP writes."""
 
-Optimized for performance with:
-- Streaming ZIP writes (attachments written directly, not held in memory)
-- Parallel issue enrichment (comments, worklogs, attachments)
-- Chunked processing with progress reporting
-- Rate-limit aware attachment downloads
-"""
-
-import io
 import json
 import logging
 import os
@@ -28,15 +19,7 @@ BACKUP_ISSUE_FIELDS = "*all"
 
 
 class JiraBackupService:
-    """Service for exporting Jira project data with optimizations.
-
-    Performance features:
-    - Uses larger page sizes for bulk issue fetching
-    - Parallel enrichment of issues (comments + worklogs + attachments)
-    - Streaming attachment writes to ZIP (no full in-memory accumulation)
-    - Thread-safe ZIP writing with lock
-    - Configurable concurrency to avoid rate limiting
-    """
+    """Exports Jira project data to ZIP archives with parallel processing."""
 
     def __init__(self, client: JiraClient):
         self.client = client
@@ -221,19 +204,3 @@ class JiraBackupService:
             if os.path.exists(temp_zip_path):
                 os.remove(temp_zip_path)
             raise e
-
-    def create_backup_zip(self, export_data: Dict) -> bytes:
-        """Legacy method for backward compatibility."""
-        project_key = export_data["metadata"]["project_key"]
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = "jira_backup_{}_{}.json".format(project_key, timestamp)
-
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(filename, json.dumps(export_data, indent=2))
-
-        return buf.getvalue()
-
-    def create_backup_json(self, export_data: Dict) -> str:
-        """Legacy method for backward compatibility."""
-        return json.dumps(export_data, indent=2)

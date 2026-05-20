@@ -1,16 +1,9 @@
-#!/usr/bin/env python3
-"""
-Unit tests for generate_report.py
-"""
+"""Unit tests for generate_report.py."""
 
-import sys
 import pytest
 from pathlib import Path
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import Config, AtlassianConfig, ReportConfig
 from src.models import Author, Component, Issue, Worklog, WorkType

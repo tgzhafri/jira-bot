@@ -136,7 +136,6 @@ class TestBackupSpace:
             _make_page_response("1", "Page One", "<p>One</p>"),
             _make_page_response("2", "Page Two", "<p>Two</p>"),
         ]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(return_value=iter(pages))
         mock_client.get_attachments_from_page = MagicMock(return_value=[])
 
@@ -157,7 +156,6 @@ class TestBackupSpace:
     def test_backup_space_with_attachments(self, service, mock_client, tmp_path):
         """Test backup with attachment downloads."""
         pages = [_make_page_response("1", "Page One", "<p>One</p>")]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(return_value=iter(pages))
         mock_client.get_attachments_from_page = MagicMock(
             return_value=[_make_attachment_response("att-1", "image.png", 512)]
@@ -179,7 +177,6 @@ class TestBackupSpace:
 
     def test_backup_space_handles_page_fetch_error(self, service, mock_client):
         """Test that a failed page fetch returns an error result."""
-        mock_client.get_all_pages_from_space = MagicMock(
             side_effect=ConfluenceClientError("API timeout")
         )
         mock_client.get_all_pages_from_space_generator = MagicMock(
@@ -197,7 +194,6 @@ class TestBackupSpace:
     ):
         """Test that attachment download errors are recorded but don't stop backup."""
         pages = [_make_page_response("1", "Page", "<p>X</p>")]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(return_value=iter(pages))
         mock_client.get_attachments_from_page = MagicMock(
             return_value=[_make_attachment_response("att-1", "big.zip", 999)]
@@ -220,7 +216,6 @@ class TestBackupSpace:
             _make_page_response("1", "P1", "<p>1</p>"),
             _make_page_response("2", "P2", "<p>2</p>"),
         ]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(return_value=iter(pages))
         mock_client.get_attachments_from_page = MagicMock(return_value=[])
 
@@ -234,7 +229,6 @@ class TestBackupSpace:
     def test_backup_space_metadata_file(self, service, mock_client, tmp_path):
         """Test that metadata.json contains correct information."""
         pages = [_make_page_response("1", "Page", "<p>X</p>")]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(return_value=iter(pages))
         mock_client.get_attachments_from_page = MagicMock(return_value=[])
 
@@ -255,7 +249,6 @@ class TestBackupSpaces:
     def test_backup_multiple_spaces(self, service, mock_client):
         """Test backing up multiple spaces."""
         pages = [_make_page_response("1", "P", "<p>X</p>")]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(side_effect=lambda *a, **kw: iter(pages))
         mock_client.get_attachments_from_page = MagicMock(return_value=[])
 
@@ -272,7 +265,6 @@ class TestCreateZipBackup:
     def test_create_zip_backup_success(self, service, mock_client, tmp_path):
         """Test that ZIP backup creates a zip file and removes the directory."""
         pages = [_make_page_response("1", "Page", "<p>X</p>")]
-        mock_client.get_all_pages_from_space = MagicMock(return_value=pages)
         mock_client.get_all_pages_from_space_generator = MagicMock(return_value=iter(pages))
         mock_client.get_attachments_from_page = MagicMock(return_value=[])
 
@@ -286,7 +278,6 @@ class TestCreateZipBackup:
 
     def test_create_zip_backup_failure_returns_none(self, service, mock_client):
         """Test that total failure returns None."""
-        mock_client.get_all_pages_from_space = MagicMock(
             side_effect=ConfluenceClientError("Network error")
         )
         mock_client.get_all_pages_from_space_generator = MagicMock(

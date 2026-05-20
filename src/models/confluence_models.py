@@ -35,15 +35,33 @@ class BackupAttachment:
 
     @classmethod
     def from_api_response(cls, data: Dict[str, Any]) -> "BackupAttachment":
-        """Parse from Confluence API attachment response."""
-        extensions = data.get("extensions", {})
+        """Parse from Confluence API v2 attachment response.
+
+        The v2 API returns mediaType, fileSize, and downloadLink as
+        top-level fields (unlike v1 which nests them under extensions).
+        """
+        # v2 format: top-level fields
+        media_type = data.get(
+            "mediaType",
+            data.get("extensions", {}).get(
+                "mediaType", "application/octet-stream"
+            ),
+        )
+        file_size = data.get(
+            "fileSize",
+            data.get("extensions", {}).get("fileSize", 0),
+        )
+        download_path = data.get(
+            "downloadLink",
+            data.get("_links", {}).get("download", ""),
+        )
         return cls(
             id=data["id"],
             title=data.get("title", ""),
             file_name=data.get("title", ""),
-            media_type=extensions.get("mediaType", "application/octet-stream"),
-            file_size=extensions.get("fileSize", 0),
-            download_path=data.get("_links", {}).get("download", ""),
+            media_type=media_type,
+            file_size=file_size,
+            download_path=download_path,
         )
 
 

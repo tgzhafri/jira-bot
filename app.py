@@ -1,22 +1,20 @@
-#!/usr/bin/env python3
-"""
-Redesigned Streamlit web UI for Automate Jira
-"""
+"""Streamlit web UI for Atlassian Bot."""
+
+import logging
 
 import streamlit as st
-import sys
-import logging
-from pathlib import Path
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from src.ui.state_manager import initialize_session_state
-from src.ui.pages import dashboard_page, worklog_page, jira_backup_page, settings_page, confluence_backup_page
-from src.ui.components.connection_ui import display_connection_status
 from streamlit_option_menu import option_menu
 
-# Configure logging
+from src.ui.state_manager import initialize_session_state
+from src.ui.pages import (
+    dashboard_page,
+    worklog_page,
+    jira_backup_page,
+    settings_page,
+    confluence_backup_page,
+)
+from src.ui.components.connection_ui import display_connection_status
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

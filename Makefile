@@ -1,4 +1,4 @@
-.PHONY: help build up down logs restart shell test lint clean
+.PHONY: help build up down logs restart shell test lint format clean
 
 help: ## Show this help message
 	@echo "Atlassian Bot — Docker Commands"
@@ -27,16 +27,23 @@ logs: ## Tail web UI logs
 	docker compose logs -f web
 
 # ---------------------------------------------------------------------------
-# Development helpers
+# Development
 # ---------------------------------------------------------------------------
 shell: ## Open a bash shell in the web container
 	docker compose exec web /bin/bash
 
-test: ## Run pytest inside a container
+test: ## Run pytest inside the container
 	docker compose exec web python -m pytest
 
-lint: ## Run linters inside a container
+test-cov: ## Run pytest with coverage
+	docker compose exec web python -m pytest --cov=src
+
+lint: ## Run flake8 inside the container
 	docker compose exec web python -m flake8 src/
+
+format: ## Run black + isort inside the container
+	docker compose exec web python -m black src/ tests/
+	docker compose exec web python -m isort src/ tests/
 
 # ---------------------------------------------------------------------------
 # Cleanup
