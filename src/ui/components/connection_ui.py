@@ -5,9 +5,7 @@ import streamlit as st
 from ...config import Config, AtlassianConfig
 from ...services.jira_client import JiraClient, JiraClientError
 from ...services.confluence_client import (
-    ConfluenceCloudClient,
-    ConfluenceAuthenticationError,
-    ConfluenceConnectionError,
+    ConfluenceClient,
     ConfluenceClientError,
 )
 
@@ -212,7 +210,7 @@ def _check_confluence_connection(config: Config) -> bool:
         if not confluence_config:
             result = False
         else:
-            client = ConfluenceCloudClient(confluence_config)
+            client = ConfluenceClient(confluence_config)
             result = client.test_connection()
     except Exception:
         result = False

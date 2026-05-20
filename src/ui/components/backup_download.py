@@ -22,6 +22,7 @@ def render_download_card(
     display_name: str,
     prefix: str = "backup",
     key_suffix: Optional[str] = None,
+    custom_filename: Optional[str] = None,
 ) -> None:
     """Render a download card with file info and a download button.
 
@@ -31,11 +32,16 @@ def render_download_card(
         prefix: Filename prefix (e.g., "jira_backup", "confluence_backup").
         key_suffix: Optional suffix for the download button key to avoid
             Streamlit duplicate key errors when rendering multiple cards.
+        custom_filename: Optional custom filename for the download. If provided,
+            overrides the auto-generated filename from prefix/display_name.
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = "{prefix}_{name}_{ts}.zip".format(
-        prefix=prefix, name=display_name, ts=timestamp
-    )
+    if custom_filename:
+        filename = custom_filename
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = "{prefix}_{name}_{ts}.zip".format(
+            prefix=prefix, name=display_name, ts=timestamp
+        )
     file_size_mb = len(file_data) / (1024 * 1024)
 
     button_key = "download_{prefix}_{suffix}".format(

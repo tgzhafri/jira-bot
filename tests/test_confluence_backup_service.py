@@ -15,7 +15,7 @@ import pytest
 from src.config import AtlassianConfig
 from src.models.confluence_models import BackupAttachment, BackupPage, SpaceBackupResult
 from src.services.confluence_backup_service import ConfluenceBackupService
-from src.services.confluence_client import ConfluenceClientError, ConfluenceCloudClient
+from src.services.confluence_client import ConfluenceClientError, ConfluenceClient
 
 
 @pytest.fixture
@@ -30,9 +30,9 @@ def config():
 
 @pytest.fixture
 def mock_client(config):
-    """Create a mocked ConfluenceCloudClient."""
-    with patch.object(ConfluenceCloudClient, "__init__", return_value=None):
-        client = ConfluenceCloudClient.__new__(ConfluenceCloudClient)
+    """Create a mocked ConfluenceClient."""
+    with patch.object(ConfluenceClient, "__init__", return_value=None):
+        client = ConfluenceClient.__new__(ConfluenceClient)
         client.config = config
         client._confluence = MagicMock()
     return client
@@ -177,6 +177,7 @@ class TestBackupSpace:
 
     def test_backup_space_handles_page_fetch_error(self, service, mock_client):
         """Test that a failed page fetch returns an error result."""
+        mock_client.get_all_pages_from_space = MagicMock(
             side_effect=ConfluenceClientError("API timeout")
         )
         mock_client.get_all_pages_from_space_generator = MagicMock(
@@ -278,6 +279,7 @@ class TestCreateZipBackup:
 
     def test_create_zip_backup_failure_returns_none(self, service, mock_client):
         """Test that total failure returns None."""
+        mock_client.get_all_pages_from_space = MagicMock(
             side_effect=ConfluenceClientError("Network error")
         )
         mock_client.get_all_pages_from_space_generator = MagicMock(

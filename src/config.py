@@ -33,12 +33,12 @@ class AtlassianConfig:
     that apply to report generation and data fetching.
     """
     url: str
-    username: str  # Email address for Basic Auth
+    username: str
     api_token: str
-    project_keys: Optional[List[str]] = None  # None means fetch all projects
+    project_keys: Optional[List[str]] = None
     enable_cache: bool = True
     cache_dir: str = ".cache"
-    max_workers: int = 8  # For parallel processing
+    max_workers: int = 8
 
     @classmethod
     def from_env(cls) -> "AtlassianConfig":

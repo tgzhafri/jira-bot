@@ -1,10 +1,9 @@
 """Streamlit web UI for Atlassian Bot."""
 
-import logging
-
 import streamlit as st
 from streamlit_option_menu import option_menu
 
+from src.utils.logging_config import setup_logging
 from src.ui.state_manager import initialize_session_state
 from src.ui.pages import (
     dashboard_page,
@@ -15,8 +14,7 @@ from src.ui.pages import (
 )
 from src.ui.components.connection_ui import display_connection_status
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+setup_logging()
 
 def main():
     """Main application entry point"""

@@ -20,7 +20,7 @@ from ..models.confluence_models import (
     BackupPage,
     SpaceBackupResult,
 )
-from .confluence_client import ConfluenceClientError, ConfluenceCloudClient
+from .confluence_client import ConfluenceClientError, ConfluenceClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +40,14 @@ class ConfluenceBackupService:
 
     def __init__(
         self,
-        client: ConfluenceCloudClient,
+        client: ConfluenceClient,
         output_dir: Optional[Path] = None,
         max_workers: int = DEFAULT_MAX_WORKERS,
     ):
         """Initialize the backup service.
 
         Args:
-            client: An authenticated ConfluenceCloudClient instance.
+            client: An authenticated ConfluenceClient instance.
             output_dir: Base directory for backup output.
                 Defaults to backups/confluence/.
             max_workers: Number of parallel workers for downloads.
